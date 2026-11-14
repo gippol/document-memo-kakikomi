@@ -205,14 +205,32 @@ export function Viewer(props: Props) {
 
   return (
     <div ref={scrollRef} className="relative h-full overflow-auto bg-paper">
-      {doc.kind === "docx" && doc.warnings.length > 0 && (
+      {doc.kind === "docx" && (doc.warnings.length > 0 || Object.keys(doc.headingStyles).length > 0) && (
         <details className="mx-auto max-w-[820px] px-12 pt-3 text-xs text-ink-dim">
-          <summary className="cursor-pointer">Word からの変換で再現できなかった要素があります（{doc.warnings.length}件）</summary>
-          <ul className="mt-1 list-disc pl-5">
-            {[...new Set(doc.warnings)].slice(0, 20).map((w) => (
-              <li key={w}>{w}</li>
-            ))}
-          </ul>
+          <summary className="cursor-pointer">
+            Word 変換情報
+            {Object.keys(doc.headingStyles).length > 0 && ` ・ 見出しとして扱った独自スタイル ${Object.keys(doc.headingStyles).length}件`}
+            {doc.warnings.length > 0 && ` ・ 再現できなかった要素 ${new Set(doc.warnings).size}件`}
+          </summary>
+          {Object.keys(doc.headingStyles).length > 0 && (
+            <ul className="mt-1 list-disc pl-5">
+              {Object.entries(doc.headingStyles).map(([name, lvl]) => (
+                <li key={name}>
+                  「{name}」→ 見出し{lvl}
+                </li>
+              ))}
+            </ul>
+          )}
+          {doc.warnings.length > 0 && (
+            <ul className="mt-1 list-disc pl-5">
+              {[...new Set(doc.warnings)].slice(0, 20).map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-1">
+            見出しが正しく表示されない場合は、資料フォルダの .shiryo-memo.json に {'{ "docxHeadings": { "スタイル名": 1 } }'} の形で指定できます（0 で見出しにしない）。
+          </p>
         </details>
       )}
       <div

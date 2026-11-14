@@ -20,6 +20,7 @@ export const api = {
   listDocuments: (root: string) => invoke<DocEntry[]>("list_documents", { root }),
   readDocument: (root: string, rel: string) => invoke<DocContent>("read_document", { root, rel }),
   readDocumentBytes: (root: string, rel: string) => invoke<ArrayBuffer>("read_document_bytes", { root, rel }),
+  readConfig: (root: string) => invoke<string | null>("read_config", { root }),
   readNotes: (root: string, rel: string) => invoke<string | null>("read_notes", { root, rel }),
   writeNotes: (root: string, rel: string, content: string) =>
     invoke<void>("write_notes", { root, rel, content }),

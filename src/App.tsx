@@ -5,6 +5,7 @@ import { NotesPanel, type NoteView, type SortMode } from "./components/NotesPane
 import { Viewer, type HighlightSpec, type TextSelection, type ViewerHandle } from "./components/Viewer";
 import { createAnchor, resolveAnchor } from "./lib/anchor";
 import { api, type DocEntry } from "./lib/api";
+import { CONFIG_FILE, DEFAULT_CONFIG, parseConfig, type FolderConfig } from "./lib/config";
 import { loadDocument, type LoadedDoc } from "./lib/document";
 import {
   emptyNotesFile,
@@ -57,6 +58,7 @@ export default function App() {
   const [saveState, setSaveState] = useState<SaveState>("none");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [configError, setConfigError] = useState<string | null>(null);
   const [selection, setSelection] = useState<TextSelection | null>(null);
   const [draft, setDraft] = useState<TextSelection | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -68,6 +70,7 @@ export default function App() {
   const rootRef = useRef<string | null>(null);
   const pathRef = useRef<string | null>(null);
   const notesRef = useRef<NotesFile | null>(null);
+  const configRef = useRef<FolderConfig>(DEFAULT_CONFIG);
   const lastWritten = useRef(new Map<string, string>());
   const pendingSave = useRef<PendingSave | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -166,6 +169,21 @@ export default function App() {
     }
   }, []);
 
+  /** フォルダ直下の .shiryo-memo.json を読む。壊れていても既定値で続行する */
+  const loadConfig = useCallback(async (r: string) => {
+    let next = DEFAULT_CONFIG;
+    try {
+      const json = await api.readConfig(r);
+      if (json !== null) next = parseConfig(json);
+      setConfigError(null);
+    } catch (e) {
+      setConfigError(`設定ファイル ${CONFIG_FILE}: ${errMsg(e)}（既定の設定で表示しています）`);
+    }
+    configRef.current = next;
+  }, []);
+
+  const docOptions = () => ({ docxHeadings: configRef.current.docxHeadings });
+
   const openDoc = useCallback(
     async (path: string) => {
       const r = rootRef.current;
@@ -175,7 +193,7 @@ export default function App() {
       setActiveId(null);
       setSelection(null);
       try {
-        const content = await loadDocument(r, path);
+        const content = await loadDocument(r, path, docOptions());
         pathRef.current = path;
         setCurrentPath(path);
         setDoc(content);
@@ -217,6 +235,7 @@ export default function App() {
         setSaveState("none");
         setError(null);
         lsSet(LS_ROOT, r);
+        await loadConfig(r);
         await api.watchFolder(r);
         const last = lsGet(lsDocKey(r));
         const initial = list.find((d) => d.path === last) ?? list[0];
@@ -225,7 +244,7 @@ export default function App() {
         setError(errMsg(e));
       }
     },
-    [flushSave, openDoc],
+    [flushSave, openDoc, loadConfig],
   );
 
   useEffect(() => {
@@ -249,14 +268,18 @@ export default function App() {
     }
     if (!cur) return;
 
-    if (paths.includes(cur)) {
-      loadDocument(r, cur)
+    const configChanged = paths.includes(CONFIG_FILE);
+    if (paths.includes(cur) || configChanged) {
+      (configChanged ? loadConfig(r) : Promise.resolve())
+        .then(() => loadDocument(r, cur, docOptions()))
         .then((c) => {
           if (pathRef.current !== cur) return;
-          setDoc((prev) => (prev?.sha256 === c.sha256 ? prev : c));
+          // 表示内容が同じなら再描画しない（Word は見出し設定の変更でハッシュは同じでも HTML が変わる）
+          const view = (d: LoadedDoc) => (d.kind === "markdown" ? d.content : d.html);
+          setDoc((prev) => (prev && prev.sha256 === c.sha256 && view(prev) === view(c) ? prev : c));
           setError(null);
         })
-        .catch(() => setError(`資料「${cur}」が見つかりません（移動または削除された可能性があります）`));
+        .catch((e) => setError(`資料「${cur}」を読み込めません: ${errMsg(e)}（移動・削除された可能性があります）`));
     }
     if (paths.includes(cur + NOTES_SUFFIX) && !pendingSave.current) {
       api.readNotes(r, cur).then((json) => {
@@ -483,9 +506,13 @@ export default function App() {
         )}
       </header>
 
-      {(error || notesError || saveError) && (
-        <div className="border-b border-line px-3 py-1 text-bright">[!] {error ?? notesError ?? saveError}</div>
-      )}
+      {[error, notesError, saveError, configError]
+        .filter((m): m is string => !!m)
+        .map((m) => (
+          <div key={m} className="border-b border-line px-3 py-1 text-bright">
+            [!] {m}
+          </div>
+        ))}
       {staleSummary.total > 0 && (
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-1">
           <span>

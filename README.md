@@ -56,7 +56,27 @@ npm test              # ユニットテスト
 | 形式 | 表示 | 位置の表示 | 版の判定（sha256） |
 | --- | --- | --- | --- |
 | Markdown (.md) | react-markdown + GFM | ソースの行番号 `L12-14` | ファイルそのもの |
-| Word (.docx) | mammoth.js で構造を HTML 化（見出し・段落・リスト・表・画像・リンク・脚注） | 段落番号 `¶12` ＋ 直前の見出し | 変換後 HTML（再保存だけでは変わらない） |
+| Word (.docx) | mammoth.js で構造を HTML 化（見出し・段落・リスト・表・画像・リンク・脚注） | 段落番号 `¶12` ＋ 直前の見出し | 本文テキスト（再保存・書式・見出し設定の変更では変わらない） |
+
+### Word の見出しスタイル
+
+1. **自動判定**: 段落スタイルの「アウトラインレベル」（基準スタイルから引き継いだものを含む）を読み、見出しにします。
+   Word のナビゲーションウィンドウに見出しとして出るスタイルなら自動で認識されます。
+2. **設定ファイル**: アウトラインレベルを持たない独自スタイルは、資料フォルダ直下の `.shiryo-memo.json` で指定します。
+   変更は保存すると即座に反映されます。
+
+```json
+{
+  "docxHeadings": {
+    "社内見出し大": 1,
+    "社内見出し中": 2,
+    "強調ボックス": 0
+  }
+}
+```
+
+値は見出しレベル 1〜6、`0` は「自動判定されても見出しにしない」。見出しとして扱ったスタイルは、資料上部の「Word 変換情報」で確認できます。
+未対応のスタイル名も同じ欄に `Unrecognised paragraph style: 'xxx'` として表示されます。
 
 Word の制限:
 - フォント・色・ページ割りなどの見た目は再現しません（ページ番号も出せません）
@@ -82,7 +102,8 @@ Word の制限:
 - `src-tauri/src/lib.rs` — ファイル一覧・読込・SHA-256・ノート書き込み（`.notes.json` 専用）・フォルダ監視
 - `src/lib/anchor.ts` — アンカー作成と再アンカー（完全一致 → 文脈スコア → diff-match-patch あいまい検索 → 前後文脈）
 - `src/lib/dom.ts` — 表示 DOM ⇔ テキストオフセット変換
-- `src/lib/document.ts` / `docx.ts` — 形式ごとの読み込み（Word は mammoth → DOMPurify → 段落番号付与）
+- `src/lib/document.ts` / `docx.ts` — 形式ごとの読み込み（Word は 見出しスタイル判定 → mammoth → DOMPurify → 段落番号付与）
+- `src/lib/config.ts` — フォルダ設定 `.shiryo-memo.json` の読み込み
 - `src/components/Viewer.tsx` — Markdown 表示、選択検知、CSS Custom Highlight API によるハイライト（資料 DOM を変更しない）
 - `src/components/NotesPanel.tsx` / `FileTree.tsx` — ノート一覧・ファイルツリー
 

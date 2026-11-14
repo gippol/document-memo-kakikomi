@@ -51,8 +51,8 @@ describe("docxToHtml", () => {
     const a = await buildDocx({ created: new Date("2026-01-01") });
     const b = await buildDocx({ created: new Date("2026-06-01") });
     expect(Buffer.from(a).equals(Buffer.from(b))).toBe(false);
-    const ha = await sha256Hex((await docxToHtml(a)).html);
-    const hb = await sha256Hex((await docxToHtml(b)).html);
+    const ha = await sha256Hex((await docxToHtml(a)).text);
+    const hb = await sha256Hex((await docxToHtml(b)).text);
     expect(ha).toBe(hb);
   });
 
@@ -77,5 +77,69 @@ describe("docxToHtml", () => {
     const loc = locateInHtml(root, rangeFromOffsets(root, s, s + 3)!);
     expect(loc.heading).toBe("認証モジュールの設計");
     expect(loc.paragraph).toBe(4);
+  });
+});
+
+/** 社内テンプレート風の独自スタイルを持つ資料 */
+async function buildCustomStyled(): Promise<ArrayBuffer> {
+  const doc = new Document({
+    styles: {
+      paragraphStyles: [
+        // アウトラインレベル 0（= 見出し1相当）を自分で持つ
+        { id: "CorpH1", name: "社内見出し大", run: { bold: true, size: 36 }, paragraph: { outlineLevel: 0 } },
+        // アウトラインレベルを基準スタイルから引き継ぐ
+        { id: "CorpH1Red", name: "社内見出し大（赤）", basedOn: "CorpH1", run: { color: "C00000" } },
+        { id: "CorpH2", name: "社内見出し中", run: { bold: true, size: 28 }, paragraph: { outlineLevel: 1 } },
+        // 見た目だけの太字スタイル（アウトラインレベルなし）
+        { id: "BigBold", name: "大きい太字", run: { bold: true, size: 32 } },
+      ],
+    },
+    sections: [
+      {
+        children: [
+          new Paragraph({ text: "概要", style: "CorpH1" }),
+          new Paragraph("本文その1"),
+          new Paragraph({ text: "注意事項", style: "CorpH1Red" }),
+          new Paragraph({ text: "詳細", style: "CorpH2" }),
+          new Paragraph({ text: "補足", style: "BigBold" }),
+          new Paragraph("本文その2"),
+        ],
+      },
+    ],
+  });
+  const buf = await Packer.toBuffer(doc);
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+}
+
+/** html 内でテキストが指定タグとして出力されているか（例: tagOf(html, "概要") === "h1"） */
+function tagOf(html: string, text: string): string | undefined {
+  const root = document.createElement("div");
+  root.innerHTML = html;
+  return Array.from(root.querySelectorAll("*")).find((el) => el.textContent === text && el.children.length === 0)?.localName;
+}
+
+describe("独自の見出しスタイル", () => {
+  it("アウトラインレベルから自動で見出しにする（基準スタイルからの引き継ぎも含む）", async () => {
+    const r = await docxToHtml(await buildCustomStyled());
+    expect(tagOf(r.html, "概要")).toBe("h1");
+    expect(tagOf(r.html, "注意事項")).toBe("h1");
+    expect(tagOf(r.html, "詳細")).toBe("h2");
+    expect(tagOf(r.html, "補足")).toBe("p");
+    expect(r.headingStyles).toEqual({ 社内見出し大: 1, "社内見出し大（赤）": 1, 社内見出し中: 2 });
+  });
+
+  it("設定で見出しを指定・解除できる（0 は見出しにしない）", async () => {
+    const r = await docxToHtml(await buildCustomStyled(), { 大きい太字: 3, 社内見出し中: 0 });
+    expect(tagOf(r.html, "補足")).toBe("h3");
+    expect(tagOf(r.html, "詳細")).toBe("p");
+    expect(r.headingStyles).toEqual({ 社内見出し大: 1, "社内見出し大（赤）": 1, 大きい太字: 3 });
+  });
+
+  it("見出し設定を変えても本文のハッシュは変わらない（ノートが旧版扱いにならない）", async () => {
+    const data = await buildCustomStyled();
+    const a = await docxToHtml(data);
+    const b = await docxToHtml(data, { 大きい太字: 3 });
+    expect(a.html).not.toBe(b.html);
+    expect(await sha256Hex(a.text)).toBe(await sha256Hex(b.text));
   });
 });

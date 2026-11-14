@@ -12,6 +12,7 @@ use tauri::ipc::Response;
 use tauri::{AppHandle, Emitter, State};
 
 const NOTES_SUFFIX: &str = ".notes.json";
+const CONFIG_FILE: &str = ".shiryo-memo.json";
 const SUPPORTED_EXT: &[&str] = &["md", "markdown", "docx"];
 const SKIP_DIRS: &[&str] = &["node_modules", "target", "dist"];
 
@@ -134,6 +135,18 @@ fn read_notes(root: String, rel: String) -> Result<Option<String>, String> {
         .map_err(|e| format!("ノートファイルを読めません: {e}"))
 }
 
+/// フォルダ直下の設定ファイルを読む（無ければ None）。
+#[tauri::command]
+fn read_config(root: String) -> Result<Option<String>, String> {
+    let path = resolve(&root, CONFIG_FILE)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|e| format!("設定ファイルを読めません: {e}"))
+}
+
 /// ノートファイルをアトミックに書き込む（一時ファイル → rename）。
 #[tauri::command]
 fn write_notes(root: String, rel: String, content: String) -> Result<(), String> {
@@ -187,6 +200,7 @@ pub fn run() {
             read_document,
             read_document_bytes,
             read_notes,
+            read_config,
             write_notes,
             watch_folder
         ])
