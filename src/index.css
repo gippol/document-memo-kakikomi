@@ -232,3 +232,86 @@ body {
 .doc img {
   max-width: 100%;
 }
+
+/* ---------- Excel（シート） ---------- */
+.sheet-grid {
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-family: var(--font-doc);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-ink);
+}
+.sheet-grid td {
+  border: 1px solid #e2ded4;
+  padding: 1px 4px;
+  white-space: pre;
+  overflow: visible;
+  vertical-align: bottom;
+  cursor: cell;
+}
+.sheet-grid td.clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sheet-grid td.num {
+  text-align: right;
+}
+.sheet-grid td.mid {
+  text-align: center;
+}
+/* 列番号（A, B, ...）と行番号は、スクロールしても見えるよう固定する */
+.sheet-grid th {
+  position: sticky;
+  z-index: 2;
+  background: #ebe8e0;
+  color: var(--color-ink-dim);
+  border: 1px solid var(--color-rule);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: normal;
+  padding: 0 4px;
+  cursor: pointer;
+  user-select: none;
+}
+.sheet-grid thead th {
+  top: 0;
+  text-align: center;
+}
+.sheet-grid tbody th {
+  left: 0;
+  text-align: right;
+}
+.sheet-grid th.corner {
+  left: 0;
+  z-index: 3;
+}
+/* ノートの付いた範囲・選択範囲（表の上に重ねて描く） */
+.cell-mark,
+.cell-sel {
+  position: absolute;
+  pointer-events: none;
+  z-index: 1;
+}
+.cell-mark {
+  background: rgb(247 220 156 / 0.45);
+  outline: 1px solid #d9a441;
+  outline-offset: -1px;
+}
+.cell-mark.stale {
+  outline: 1px dashed var(--color-warn);
+}
+.cell-mark.active {
+  background: rgb(232 163 61 / 0.4);
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+.cell-mark.pending {
+  background: rgb(185 215 242 / 0.5);
+  outline: 1px solid #6a9fd0;
+}
+.cell-sel {
+  outline: 2px solid #2f6db3;
+  outline-offset: -2px;
+  background: rgb(47 109 179 / 0.08);
+}
