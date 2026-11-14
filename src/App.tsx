@@ -1,5 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { FileTree } from "./components/FileTree";
 import { NotesPanel, type NoteView, type SortMode } from "./components/NotesPanel";
 import { Viewer, type HighlightSpec, type TextSelection, type ViewerHandle } from "./components/Viewer";
@@ -27,6 +27,14 @@ interface PendingSave {
 const LS_ROOT = "shiryo-memo:lastRoot";
 const lsDocKey = (root: string) => `shiryo-memo:lastDoc:${root}`;
 const SAVE_DELAY = 500;
+
+/** 資料とノートの配置: side = 左右, stack = 上下 */
+type Layout = "side" | "stack";
+const LS_LAYOUT = "shiryo-memo:layout";
+const lsPaneKey = (l: Layout) => `shiryo-memo:notesSize:${l}`;
+/** ノート欄の既定サイズ（side: 幅, stack: 高さ, px） */
+const PANE_DEFAULT: Record<Layout, number> = { side: 380, stack: 280 };
+const PANE_MIN = 160;
 
 function lsGet(key: string): string | null {
   try {
@@ -65,6 +73,44 @@ export default function App() {
   const [focusTick, setFocusTick] = useState(0);
   const [sortMode, setSortMode] = useState<SortMode>("position");
   const [treeOpen, setTreeOpen] = useState(true);
+  const [layout, setLayout] = useState<Layout>(() => (lsGet(LS_LAYOUT) === "stack" ? "stack" : "side"));
+  const [paneSize, setPaneSize] = useState<Record<Layout, number>>(() => ({
+    side: Number(lsGet(lsPaneKey("side"))) || PANE_DEFAULT.side,
+    stack: Number(lsGet(lsPaneKey("stack"))) || PANE_DEFAULT.stack,
+  }));
+  const splitRef = useRef<HTMLDivElement>(null);
+
+  const toggleLayout = () => {
+    const next: Layout = layout === "side" ? "stack" : "side";
+    lsSet(LS_LAYOUT, next);
+    setLayout(next);
+  };
+
+  // 境界線のドラッグでノート欄のサイズを変える
+  const startResize = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const box = splitRef.current?.getBoundingClientRect();
+    if (!box) return;
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    const l = layout;
+    let size = paneSize[l];
+    const onMove = (ev: PointerEvent) => {
+      const total = l === "side" ? box.width : box.height;
+      const raw = l === "side" ? box.right - ev.clientX : box.bottom - ev.clientY;
+      size = Math.round(Math.min(Math.max(raw, PANE_MIN), total - PANE_MIN));
+      setPaneSize((p) => ({ ...p, [l]: size }));
+    };
+    const onUp = () => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+      lsSet(lsPaneKey(l), String(size));
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+  };
 
   const viewerRef = useRef<ViewerHandle>(null);
   const rootRef = useRef<string | null>(null);
@@ -492,6 +538,9 @@ export default function App() {
         <button onClick={() => setTreeOpen((o) => !o)} className={`btn ${treeOpen ? "on" : ""}`} title="ファイル一覧の表示切替">
           TREE
         </button>
+        <button onClick={toggleLayout} className="btn" title="資料とノートの配置を切り替え（左右 / 上下）">
+          {layout === "side" ? "左右" : "上下"}
+        </button>
         <button onClick={pickFolder} className="btn" title={root}>
           {rootName}/
         </button>
@@ -536,45 +585,62 @@ export default function App() {
           </aside>
         )}
 
-        <main className="min-w-0 flex-1">
-          {doc && currentPath ? (
-            <Viewer
-              ref={viewerRef}
-              doc={doc}
-              docAbsPath={docAbsPath}
-              highlights={highlights}
-              activeId={activeId}
-              pending={draft}
-              onTextReady={setDocText}
-              onSelectionChange={setSelection}
-              onAddNote={startDraft}
-              onClickOffset={onClickOffset}
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-dim">-- 左の一覧から資料を選択 --</div>
-          )}
-        </main>
+        <div ref={splitRef} className={`flex min-h-0 min-w-0 flex-1 ${layout === "side" ? "flex-row" : "flex-col"}`}>
+          <main className="min-h-0 min-w-0 flex-1">
+            {doc && currentPath ? (
+              <Viewer
+                ref={viewerRef}
+                doc={doc}
+                docAbsPath={docAbsPath}
+                highlights={highlights}
+                activeId={activeId}
+                pending={draft}
+                onTextReady={setDocText}
+                onSelectionChange={setSelection}
+                onAddNote={startDraft}
+                onClickOffset={onClickOffset}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-dim">-- 左の一覧から資料を選択 --</div>
+            )}
+          </main>
 
-        <aside className="w-[46ch] shrink-0 border-l border-line">
-          {currentPath && (
-            <NotesPanel
-              items={sortedViews}
-              activeId={activeId}
-              focusTick={focusTick}
-              draft={draft}
-              hasSelection={!!selection && canEdit}
-              sortMode={sortMode}
-              onSortMode={setSortMode}
-              onAddFromSelection={startDraft}
-              onDraftSave={saveDraft}
-              onDraftCancel={() => setDraft(null)}
-              onUpdate={updateComment}
-              onDelete={deleteNote}
-              onJump={jumpTo}
-              onReattach={reattach}
-            />
-          )}
-        </aside>
+          <div
+            role="separator"
+            aria-orientation={layout === "side" ? "vertical" : "horizontal"}
+            title="ドラッグでサイズ変更"
+            onPointerDown={startResize}
+            className={`shrink-0 bg-line hover:bg-accent ${layout === "side" ? "w-1 cursor-col-resize" : "h-1 cursor-row-resize"}`}
+          />
+
+          <aside
+            className="min-h-0 min-w-0 shrink-0"
+            style={
+              layout === "side"
+                ? { width: paneSize.side, maxWidth: `calc(100% - ${PANE_MIN}px)` }
+                : { height: paneSize.stack, maxHeight: `calc(100% - ${PANE_MIN}px)` }
+            }
+          >
+            {currentPath && (
+              <NotesPanel
+                items={sortedViews}
+                activeId={activeId}
+                focusTick={focusTick}
+                draft={draft}
+                hasSelection={!!selection && canEdit}
+                sortMode={sortMode}
+                onSortMode={setSortMode}
+                onAddFromSelection={startDraft}
+                onDraftSave={saveDraft}
+                onDraftCancel={() => setDraft(null)}
+                onUpdate={updateComment}
+                onDelete={deleteNote}
+                onJump={jumpTo}
+                onReattach={reattach}
+              />
+            )}
+          </aside>
+        </div>
       </div>
 
       {/* フッター */}
