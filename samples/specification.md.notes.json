@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "source": {
+    "file": "specification.md"
+  },
+  "notes": [
+    {
+      "id": "note-001",
+      "comment": "この名前いいね(＾ω＾)",
+      "createdAt": "2026-11-14T21:09:02.818Z",
+      "updatedAt": "2026-11-14T21:09:02.818Z",
+      "anchor": {
+        "type": "text",
+        "quote": "認証モジュールの設計",
+        "prefix": "の概要として、ここが重要な仕様です、実装時は注意してください。\n",
+        "suffix": "\nJWTを用いたセキュアなトークン認証を採用する。トークンの有効",
+        "start": 47,
+        "end": 57,
+        "lineStart": 5,
+        "lineEnd": 5,
+        "sourceSha256": "030371664408110255c2fb5c633308ea221e07674d368c0cd509e5965d8bbdec"
+      }
+    },
+    {
+      "id": "note-002",
+      "comment": "お、課題か(＾ω＾)",
+      "createdAt": "2026-11-14T21:09:29.115Z",
+      "updatedAt": "2026-11-14T21:09:29.115Z",
+      "anchor": {
+        "type": "text",
+        "quote": "今後の課題",
+        "prefix": "更新する。\n項目内容方式JWT (RS256)有効期限1 時間\n",
+        "suffix": "\n\n監査ログの保存期間\n外部 IdP との連携\n",
+        "start": 143,
+        "end": 148,
+        "lineStart": 14,
+        "lineEnd": 14,
+        "sourceSha256": "030371664408110255c2fb5c633308ea221e07674d368c0cd509e5965d8bbdec"
+      }
+    },
+    {
+      "id": "note-003",
+      "comment": "セキュリティは大事なのだ(＾ω＾)",
+      "createdAt": "2026-11-14T21:10:03.735Z",
+      "updatedAt": "2026-11-14T21:10:03.735Z",
+      "anchor": {
+        "type": "text",
+        "quote": "セキュア",
+        "prefix": "実装時は注意してください。\n認証モジュールの設計\nJWTを用いた",
+        "suffix": "なトークン認証を採用する。トークンの有効期限は 1 時間とし、リ",
+        "start": 65,
+        "end": 69,
+        "lineStart": 7,
+        "lineEnd": 7,
+        "sourceSha256": "030371664408110255c2fb5c633308ea221e07674d368c0cd509e5965d8bbdec"
+      }
+    }
+  ]
+}
