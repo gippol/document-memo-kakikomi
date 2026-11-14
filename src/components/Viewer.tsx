@@ -4,7 +4,7 @@ import { memo, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { trimRange, type AnchorLocation } from "../lib/anchor";
-import type { LoadedDoc } from "../lib/document";
+import type { TextDoc } from "../lib/document";
 import { containerText, linesOfRange, locateInHtml, offsetFromPoint, offsetOf, rangeFromOffsets } from "../lib/dom";
 
 export interface HighlightSpec {
@@ -28,7 +28,7 @@ export interface ViewerHandle {
 
 interface Props {
   ref: Ref<ViewerHandle>;
-  doc: LoadedDoc;
+  doc: TextDoc;
   /** 資料の絶対パス（相対画像の解決に使う） */
   docAbsPath: string;
   highlights: HighlightSpec[];

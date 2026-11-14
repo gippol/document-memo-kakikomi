@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter, State};
 
 const NOTES_SUFFIX: &str = ".notes.json";
 const CONFIG_FILE: &str = ".shiryo-memo.json";
-const SUPPORTED_EXT: &[&str] = &["md", "markdown", "docx"];
+const SUPPORTED_EXT: &[&str] = &["md", "markdown", "docx", "xlsx", "xlsm", "xls"];
 const SKIP_DIRS: &[&str] = &["node_modules", "target", "dist"];
 
 #[derive(Default)]

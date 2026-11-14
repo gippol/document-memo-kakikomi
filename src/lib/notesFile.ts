@@ -1,4 +1,8 @@
 import type { TextAnchor } from "./anchor";
+import type { CellAnchor } from "./sheet";
+
+/** Markdown・Word はテキスト範囲、Excel はセル範囲にノートを付ける */
+export type Anchor = TextAnchor | CellAnchor;
 
 export const NOTES_FILE_VERSION = 1;
 export const NOTES_SUFFIX = ".notes.json";
@@ -8,7 +12,7 @@ export interface Note {
   comment: string;
   createdAt: string;
   updatedAt: string;
-  anchor: TextAnchor;
+  anchor: Anchor;
 }
 
 export interface NotesFile {
@@ -50,22 +54,38 @@ export function serializeNotesFile(file: NotesFile): string {
       comment: n.comment,
       createdAt: n.createdAt,
       updatedAt: n.updatedAt,
-      anchor: {
-        type: n.anchor.type,
-        quote: n.anchor.quote,
-        prefix: n.anchor.prefix,
-        suffix: n.anchor.suffix,
-        start: n.anchor.start,
-        end: n.anchor.end,
-        lineStart: n.anchor.lineStart,
-        lineEnd: n.anchor.lineEnd,
-        paragraph: n.anchor.paragraph,
-        heading: n.anchor.heading,
-        sourceSha256: n.anchor.sourceSha256,
-      },
+      anchor: orderAnchor(n.anchor),
     })),
   };
   return JSON.stringify(ordered, null, 2) + "\n";
+}
+
+function orderAnchor(a: Anchor) {
+  if (a.type === "cell") {
+    return {
+      type: a.type,
+      sheet: a.sheet,
+      ref: a.ref,
+      quote: a.quote,
+      values: a.values,
+      rowHeader: a.rowHeader,
+      colHeader: a.colHeader,
+      sourceSha256: a.sourceSha256,
+    };
+  }
+  return {
+    type: a.type,
+    quote: a.quote,
+    prefix: a.prefix,
+    suffix: a.suffix,
+    start: a.start,
+    end: a.end,
+    lineStart: a.lineStart,
+    lineEnd: a.lineEnd,
+    paragraph: a.paragraph,
+    heading: a.heading,
+    sourceSha256: a.sourceSha256,
+  };
 }
 
 export function nextNoteId(notes: Note[]): string {

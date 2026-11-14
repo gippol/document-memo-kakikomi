@@ -1,14 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import type { AnchorLocation, AnchorStatus } from "../lib/anchor";
 import type { Note } from "../lib/notesFile";
+import type { CellRange } from "../lib/sheet";
+
+/** ノートが現在の資料で指している範囲 */
+export type NoteTarget = { kind: "text"; start: number; end: number } | { kind: "cell"; sheet: string; range: CellRange };
 
 export interface NoteView extends AnchorLocation {
   note: Note;
   status: AnchorStatus;
   /** 現在の資料の版と異なる版で作成されたノート */
   stale: boolean;
-  start: number;
-  end: number;
+  /** 見つからない（orphaned）ときは null */
+  target: NoteTarget | null;
+  /** Excel: シート名とセル範囲（例: "予算!B3:D5"） */
+  cell?: string;
+  /** 「位置」順に並べるときのキー */
+  sortKey: number;
 }
 
 export type SortMode = "position" | "timeline";
@@ -34,13 +42,14 @@ interface Props {
 const STATUS_TAG: Record<AnchorStatus, { label: string; title: string } | null> = {
   ok: null,
   moved: { label: "MOVED", title: "資料の変更で位置がずれていたため、文脈から再アンカーしました" },
-  fuzzy: { label: "FUZZY", title: "引用文自体が書き換わっています。推定した箇所を表示しています" },
+  fuzzy: { label: "FUZZY", title: "引用した内容自体が書き換わっています。推定した箇所を表示しています" },
   orphaned: { label: "LOST", title: "資料から該当箇所が見つかりません" },
 };
 
-/** Markdown は行番号、Word は段落番号で位置を表す */
+/** Markdown は行番号、Word は段落番号、Excel はセル範囲で位置を表す */
 function lineLabel(v: NoteView) {
   if (v.status === "orphaned") return "---";
+  if (v.cell) return v.cell;
   if (v.lineStart !== undefined) {
     return v.lineEnd && v.lineEnd !== v.lineStart ? `L${v.lineStart}-${v.lineEnd}` : `L${v.lineStart}`;
   }
@@ -89,7 +98,7 @@ function CommentEditor(props: { initial: string; onSave(v: string): void; onCanc
 }
 
 function Quote({ text }: { text: string }) {
-  return <div className="mt-1 line-clamp-3 border-l-2 border-accent/70 pl-[1ch] text-dim">{text}</div>;
+  return <div className="mt-1 line-clamp-3 whitespace-pre-line border-l-2 border-accent/70 pl-[1ch] text-dim">{text}</div>;
 }
 
 function NoteCard(props: {
@@ -181,7 +190,7 @@ function NoteCard(props: {
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={props.onReattach}
                   disabled={!props.hasSelection}
-                  title={props.hasSelection ? "現在の選択範囲にこのノートを付け直します" : "資料上でテキストを選択すると付け直せます"}
+                  title={props.hasSelection ? "現在の選択範囲にこのノートを付け直します" : "資料上でテキスト（Excel はセル）を選択すると付け直せます"}
                   className="btn"
                 >
                   付け直す
@@ -237,7 +246,7 @@ export function NotesPanel(props: Props) {
           <p className="px-2 py-4 text-dim">
             -- ノートなし --
             <br />
-            資料のテキストを選択して Ctrl+M で追加
+            資料のテキスト（Excel はセル）を選択して Ctrl+M で追加
           </p>
         )}
         {items.map((v) => (

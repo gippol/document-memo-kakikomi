@@ -1,13 +1,16 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { FileTree } from "./components/FileTree";
-import { NotesPanel, type NoteView, type SortMode } from "./components/NotesPanel";
+import { NotesPanel, type NoteTarget, type NoteView, type SortMode } from "./components/NotesPanel";
+import { SheetViewer, type CellHighlight, type CellSelection, type SheetViewerHandle } from "./components/SheetViewer";
 import { Viewer, type HighlightSpec, type TextSelection, type ViewerHandle } from "./components/Viewer";
 import { createAnchor, resolveAnchor } from "./lib/anchor";
 import { api, type DocEntry } from "./lib/api";
 import { CONFIG_FILE, DEFAULT_CONFIG, parseConfig, type FolderConfig } from "./lib/config";
 import { loadDocument, type LoadedDoc } from "./lib/document";
+import { createCellAnchor, formatRef, headerLabel, headersAt, resolveCellAnchor } from "./lib/sheet";
 import {
+  type Anchor,
   emptyNotesFile,
   nextNoteId,
   NOTES_SUFFIX,
@@ -17,6 +20,9 @@ import {
 } from "./lib/notesFile";
 
 type SaveState = "none" | "pending" | "saving" | "saved" | "error";
+
+/** 資料上の選択（Markdown・Word: テキスト範囲 / Excel: セル範囲） */
+type DocSelection = ({ kind: "text" } & TextSelection) | ({ kind: "cell" } & CellSelection);
 
 interface PendingSave {
   root: string;
@@ -67,8 +73,8 @@ export default function App() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
-  const [selection, setSelection] = useState<TextSelection | null>(null);
-  const [draft, setDraft] = useState<TextSelection | null>(null);
+  const [selection, setSelection] = useState<DocSelection | null>(null);
+  const [draft, setDraft] = useState<DocSelection | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [focusTick, setFocusTick] = useState(0);
   const [sortMode, setSortMode] = useState<SortMode>("position");
@@ -113,6 +119,7 @@ export default function App() {
   };
 
   const viewerRef = useRef<ViewerHandle>(null);
+  const sheetRef = useRef<SheetViewerHandle>(null);
   const rootRef = useRef<string | null>(null);
   const pathRef = useRef<string | null>(null);
   const notesRef = useRef<NotesFile | null>(null);
@@ -308,7 +315,7 @@ export default function App() {
     const cur = pathRef.current;
     if (!r) return;
 
-    if (paths.some((p) => /\.(md|markdown|docx|notes\.json)$/i.test(p) || !/\.[^/]+$/.test(p))) {
+    if (paths.some((p) => /\.(md|markdown|docx|xlsx|xlsm|xls|notes\.json)$/i.test(p) || !/\.[^/]+$/.test(p))) {
       if (treeTimer.current) clearTimeout(treeTimer.current);
       treeTimer.current = setTimeout(() => void refreshDocs(), 300);
     }
@@ -321,7 +328,7 @@ export default function App() {
         .then((c) => {
           if (pathRef.current !== cur) return;
           // 表示内容が同じなら再描画しない（Word は見出し設定の変更でハッシュは同じでも HTML が変わる）
-          const view = (d: LoadedDoc) => (d.kind === "markdown" ? d.content : d.html);
+          const view = (d: LoadedDoc) => (d.kind === "markdown" ? d.content : d.kind === "docx" ? d.html : d.sha256);
           setDoc((prev) => (prev && prev.sha256 === c.sha256 && view(prev) === view(c) ? prev : c));
           setError(null);
         })
@@ -346,10 +353,28 @@ export default function App() {
   // ---------- アンカー解決 ----------
 
   const views: NoteView[] = useMemo(() => {
-    if (!notesFile || docText === null || !doc) return [];
-    return notesFile.notes.map((note) => {
-      const r = resolveAnchor(docText, note.anchor);
+    if (!notesFile || !doc) return [];
+    return notesFile.notes.map((note): NoteView => {
       const stale = note.anchor.sourceSha256 !== doc.sha256;
+      const lost: NoteView = { note, status: "orphaned", stale, target: null, sortKey: Infinity };
+      if (note.anchor.type === "cell") {
+        if (doc.kind !== "xlsx") return lost;
+        const r = resolveCellAnchor(doc.book, note.anchor);
+        if (r.status === "orphaned") return lost;
+        const idx = doc.book.sheets.findIndex((s) => s.name === r.sheet);
+        const sheet = doc.book.sheets[idx];
+        return {
+          note,
+          status: r.status,
+          stale,
+          target: { kind: "cell", sheet: r.sheet, range: r.range },
+          cell: `${r.sheet}!${formatRef(r.range)}`,
+          heading: headerLabel(r.status === "ok" ? note.anchor : headersAt(sheet, r.range.r1, r.range.c1)),
+          sortKey: idx * 1e8 + r.range.r1 * 1e3 + r.range.c1,
+        };
+      }
+      if (doc.kind === "xlsx" || docText === null) return lost;
+      const r = resolveAnchor(docText, note.anchor);
       const lines =
         r.status === "ok" && !stale
           ? {
@@ -361,7 +386,8 @@ export default function App() {
           : r.status === "orphaned"
             ? {}
             : (viewerRef.current?.locate(r.start, r.end) ?? {});
-      return { note, status: r.status, stale, start: r.start, end: r.end, ...lines };
+      const target: NoteTarget | null = r.status === "orphaned" ? null : { kind: "text", start: r.start, end: r.end };
+      return { note, status: r.status, stale, target, sortKey: r.status === "orphaned" ? Infinity : r.start, ...lines };
     });
   }, [notesFile, docText, doc]);
 
@@ -371,7 +397,7 @@ export default function App() {
       arr.sort((a, b) => {
         const ao = a.status === "orphaned" ? 1 : 0;
         const bo = b.status === "orphaned" ? 1 : 0;
-        return ao - bo || a.start - b.start;
+        return ao - bo || a.sortKey - b.sortKey;
       });
     } else {
       arr.sort((a, b) => b.note.createdAt.localeCompare(a.note.createdAt));
@@ -381,9 +407,17 @@ export default function App() {
 
   const highlights: HighlightSpec[] = useMemo(
     () =>
-      views
-        .filter((v) => v.status !== "orphaned")
-        .map((v) => ({ id: v.note.id, start: v.start, end: v.end, stale: v.status === "fuzzy" })),
+      views.flatMap((v) =>
+        v.target?.kind === "text" ? [{ id: v.note.id, start: v.target.start, end: v.target.end, stale: v.status === "fuzzy" }] : [],
+      ),
+    [views],
+  );
+
+  const cellHighlights: CellHighlight[] = useMemo(
+    () =>
+      views.flatMap((v) =>
+        v.target?.kind === "cell" ? [{ id: v.note.id, sheet: v.target.sheet, range: v.target.range, stale: v.status === "fuzzy" }] : [],
+      ),
     [views],
   );
 
@@ -401,29 +435,41 @@ export default function App() {
 
   // ---------- 操作 ----------
 
-  const canEdit = !!doc && docText !== null && !notesError;
+  const canEdit = !!doc && (doc.kind === "xlsx" || docText !== null) && !notesError;
+
+  const clearSelection = () => {
+    window.getSelection()?.removeAllRanges();
+    sheetRef.current?.clearSelection();
+  };
+
+  /** 現在の資料の範囲からアンカーを作る */
+  const makeAnchor = (t: NoteTarget): Anchor | null => {
+    if (!doc) return null;
+    if (t.kind === "cell") {
+      const sheet = doc.kind === "xlsx" ? doc.book.sheets.find((s) => s.name === t.sheet) : undefined;
+      return sheet ? createCellAnchor(sheet, t.range, doc.sha256) : null;
+    }
+    if (docText === null || doc.kind === "xlsx") return null;
+    return createAnchor(docText, t.start, t.end, doc.sha256, viewerRef.current?.locate(t.start, t.end));
+  };
 
   const startDraft = useCallback(() => {
     if (!selection || !canEdit) return;
     setDraft(selection);
     setActiveId(null);
     window.getSelection()?.removeAllRanges();
+    sheetRef.current?.clearSelection();
   }, [selection, canEdit]);
 
   const saveDraft = (comment: string) => {
-    if (!draft || !doc || docText === null) return;
+    if (!draft) return;
+    const anchor = makeAnchor(draft);
+    if (!anchor) return;
     const now = new Date().toISOString();
-    const lines = viewerRef.current?.locate(draft.start, draft.end);
     let newId = "";
     updateNotes((f) => {
       newId = nextNoteId(f.notes);
-      return {
-        ...f,
-        notes: [
-          ...f.notes,
-          { id: newId, comment, createdAt: now, updatedAt: now, anchor: createAnchor(docText, draft.start, draft.end, doc.sha256, lines) },
-        ],
-      };
+      return { ...f, notes: [...f.notes, { id: newId, comment, createdAt: now, updatedAt: now, anchor }] };
     });
     setDraft(null);
     setActiveId(newId);
@@ -441,47 +487,61 @@ export default function App() {
   };
 
   const jumpTo = (id: string) => {
-    const v = views.find((x) => x.note.id === id);
-    if (!v || v.status === "orphaned") return;
+    const t = views.find((x) => x.note.id === id)?.target;
+    if (!t) return;
     setActiveId(id);
-    setFocusTick((t) => t + 1);
-    viewerRef.current?.scrollToRange(v.start, v.end);
+    setFocusTick((n) => n + 1);
+    if (t.kind === "text") viewerRef.current?.scrollToRange(t.start, t.end);
+    else sheetRef.current?.scrollToRange(t.sheet, t.range);
   };
 
   const reattach = (id: string) => {
-    if (!selection || !doc || docText === null) return;
-    const anchor = createAnchor(docText, selection.start, selection.end, doc.sha256, viewerRef.current?.locate(selection.start, selection.end));
+    if (!selection) return;
+    const anchor = makeAnchor(selection);
+    if (!anchor) return;
     updateNotes((f) => ({
       ...f,
       notes: f.notes.map((n) => (n.id === id ? { ...n, anchor, updatedAt: new Date().toISOString() } : n)),
     }));
-    window.getSelection()?.removeAllRanges();
+    clearSelection();
     setActiveId(id);
   };
 
   /** 自動追従・推定した位置を現在の版のアンカーとして確定する */
   const confirmReanchor = () => {
-    if (!doc || docText === null) return;
+    if (!doc) return;
     const byId = new Map(views.map((v) => [v.note.id, v]));
     updateNotes((f) => ({
       ...f,
       notes: f.notes.map((n) => {
         const v = byId.get(n.id);
-        if (!v || v.status === "orphaned" || (!v.stale && v.status === "ok")) return n;
-        return { ...n, anchor: createAnchor(docText, v.start, v.end, doc.sha256, viewerRef.current?.locate(v.start, v.end)) };
+        if (!v?.target || (!v.stale && v.status === "ok")) return n;
+        const anchor = makeAnchor(v.target);
+        return anchor ? { ...n, anchor } : n;
       }),
     }));
   };
 
-  const onClickOffset = (off: number) => {
-    let best: NoteView | null = null;
-    for (const v of views as NoteView[]) {
-      if (v.status === "orphaned" || off < v.start || off >= v.end) continue;
-      if (!best || v.end - v.start < best.end - best.start) best = v;
+  /** クリックした位置を含むノートのうち、範囲が最も狭いものをアクティブにする */
+  const activateSmallest = (size: (t: NoteTarget) => number | null) => {
+    let best: { id: string; n: number } | null = null;
+    for (const v of views) {
+      const n = v.target ? size(v.target) : null;
+      if (n !== null && (!best || n < best.n)) best = { id: v.note.id, n };
     }
-    setActiveId(best?.note.id ?? null);
+    setActiveId(best?.id ?? null);
     if (best) setFocusTick((t) => t + 1);
   };
+
+  const onClickOffset = (off: number) =>
+    activateSmallest((t) => (t.kind === "text" && off >= t.start && off < t.end ? t.end - t.start : null));
+
+  const onClickCell = (sheet: string, r: number, c: number) =>
+    activateSmallest((t) =>
+      t.kind === "cell" && t.sheet === sheet && r >= t.range.r1 && r <= t.range.r2 && c >= t.range.c1 && c <= t.range.c2
+        ? (t.range.r2 - t.range.r1 + 1) * (t.range.c2 - t.range.c1 + 1)
+        : null,
+    );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -587,16 +647,29 @@ export default function App() {
 
         <div ref={splitRef} className={`flex min-h-0 min-w-0 flex-1 ${layout === "side" ? "flex-row" : "flex-col"}`}>
           <main className="min-h-0 min-w-0 flex-1">
-            {doc && currentPath ? (
+            {doc && currentPath && doc.kind === "xlsx" ? (
+              <SheetViewer
+                key={currentPath}
+                ref={sheetRef}
+                book={doc.book}
+                warnings={doc.warnings}
+                highlights={cellHighlights}
+                activeId={activeId}
+                pending={draft?.kind === "cell" ? draft : null}
+                onSelectionChange={(s) => setSelection(s && { kind: "cell", ...s })}
+                onAddNote={startDraft}
+                onClickCell={onClickCell}
+              />
+            ) : doc && currentPath && doc.kind !== "xlsx" ? (
               <Viewer
                 ref={viewerRef}
                 doc={doc}
                 docAbsPath={docAbsPath}
                 highlights={highlights}
                 activeId={activeId}
-                pending={draft}
+                pending={draft?.kind === "text" ? draft : null}
                 onTextReady={setDocText}
-                onSelectionChange={setSelection}
+                onSelectionChange={(s) => setSelection(s && { kind: "text", ...s })}
                 onAddNote={startDraft}
                 onClickOffset={onClickOffset}
               />
@@ -646,8 +719,12 @@ export default function App() {
       {/* フッター */}
       <footer className="truncate border-t border-line bg-panel px-2 py-0.5 text-dim">
         {selection
-          ? `SEL ${selection.start}-${selection.end} "${selection.quote.length > 40 ? selection.quote.slice(0, 40) + "..." : selection.quote}"  |  Ctrl+M: ノート追加`
-          : "テキスト選択 -> Ctrl+M: ノート追加  |  ハイライトをクリック: ノートへ移動"}
+          ? `SEL ${selection.kind === "cell" ? `${selection.sheet}!${formatRef(selection.range)}` : `${selection.start}-${selection.end}`} "${
+              selection.quote.length > 40 ? selection.quote.slice(0, 40) + "..." : selection.quote
+            }"  |  Ctrl+M: ノート追加`
+          : doc?.kind === "xlsx"
+            ? "セルをクリック・ドラッグで選択 (Shift+クリックで拡張 / 行・列番号で行・列全体) -> Ctrl+M: ノート追加  |  Ctrl+C: コピー"
+            : "テキスト選択 -> Ctrl+M: ノート追加  |  ハイライトをクリック: ノートへ移動"}
       </footer>
     </div>
   );
