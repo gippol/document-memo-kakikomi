@@ -10,13 +10,15 @@ import type { SheetBook } from "./sheet";
  * - Word: 本文テキストのハッシュ（Word は内容が同じでも保存のたびに ZIP の中身が変わるため。
  *   見出し設定の変更や書式だけの変更でもノートが「旧版」扱いにならない）
  * - Excel: シート名とセルの表示値のハッシュ（Word と同じ理由。書式だけの変更では旧版扱いにならない）
+ * - PowerPoint: スライドの文字（発表者ノートを含む）のハッシュ（Word と同じ理由）
  */
 export type LoadedDoc =
   | { kind: "markdown"; content: string; sha256: string }
   | { kind: "docx"; html: string; sha256: string; warnings: string[]; headingStyles: Record<string, number> }
-  | { kind: "xlsx"; book: SheetBook; sha256: string; warnings: string[] };
+  | { kind: "xlsx"; book: SheetBook; sha256: string; warnings: string[] }
+  | { kind: "pptx"; html: string; sha256: string; warnings: string[]; slideCount: number };
 
-/** テキストとして表示する資料（Markdown / Word） */
+/** テキストとして表示する資料（Markdown / Word / PowerPoint） */
 export type TextDoc = Exclude<LoadedDoc, { kind: "xlsx" }>;
 
 export interface LoadOptions {
@@ -29,6 +31,7 @@ export function docKind(path: string): DocKind | null {
   if (/\.(md|markdown)$/i.test(path)) return "markdown";
   if (/\.docx$/i.test(path)) return "docx";
   if (/\.(xlsx|xlsm|xls)$/i.test(path)) return "xlsx";
+  if (/\.pptx$/i.test(path)) return "pptx";
   return null;
 }
 
@@ -67,6 +70,23 @@ async function loadOnce(root: string, path: string, opts: LoadOptions): Promise<
       throw new Error(`Excel ファイルを解析できません（${e instanceof Error ? e.message : e}）`);
     }
     return { kind, book: converted.book, warnings: converted.warnings, sha256: await sha256Hex(converted.text) };
+  }
+  if (kind === "pptx") {
+    const bytes = await api.readDocumentBytes(root, path);
+    const { pptxToHtml } = await import("./pptx");
+    let converted;
+    try {
+      converted = await pptxToHtml(bytes);
+    } catch (e) {
+      throw new Error(`PowerPoint ファイルを解析できません（${e instanceof Error ? e.message : e}）`);
+    }
+    return {
+      kind,
+      html: converted.html,
+      warnings: converted.warnings,
+      slideCount: converted.slideCount,
+      sha256: await sha256Hex(converted.text),
+    };
   }
   throw new Error(`未対応の形式です: ${path}`);
 }

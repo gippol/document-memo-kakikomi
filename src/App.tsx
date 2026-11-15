@@ -5,6 +5,7 @@ import { NotesPanel, type NoteTarget, type NoteView, type SortMode } from "./com
 import { SheetViewer, type CellHighlight, type CellSelection, type SheetViewerHandle } from "./components/SheetViewer";
 import { Viewer, type HighlightSpec, type TextSelection, type ViewerHandle } from "./components/Viewer";
 import { createAnchor, resolveAnchor } from "./lib/anchor";
+import type { SlideSpan } from "./lib/dom";
 import { api, type DocEntry } from "./lib/api";
 import { CONFIG_FILE, DEFAULT_CONFIG, parseConfig, type FolderConfig } from "./lib/config";
 import { loadDocument, type LoadedDoc } from "./lib/document";
@@ -67,6 +68,8 @@ export default function App() {
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [doc, setDoc] = useState<LoadedDoc | null>(null);
   const [docText, setDocText] = useState<string | null>(null);
+  /** PowerPoint: 各スライドが表示テキスト上で占める範囲 */
+  const [slides, setSlides] = useState<SlideSpan[]>([]);
   const [notesFile, setNotesFile] = useState<NotesFile | null>(null);
   const [notesError, setNotesError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("none");
@@ -315,7 +318,7 @@ export default function App() {
     const cur = pathRef.current;
     if (!r) return;
 
-    if (paths.some((p) => /\.(md|markdown|docx|xlsx|xlsm|xls|notes\.json)$/i.test(p) || !/\.[^/]+$/.test(p))) {
+    if (paths.some((p) => /\.(md|markdown|docx|pptx|xlsx|xlsm|xls|notes\.json)$/i.test(p) || !/\.[^/]+$/.test(p))) {
       if (treeTimer.current) clearTimeout(treeTimer.current);
       treeTimer.current = setTimeout(() => void refreshDocs(), 300);
     }
@@ -328,7 +331,7 @@ export default function App() {
         .then((c) => {
           if (pathRef.current !== cur) return;
           // 表示内容が同じなら再描画しない（Word は見出し設定の変更でハッシュは同じでも HTML が変わる）
-          const view = (d: LoadedDoc) => (d.kind === "markdown" ? d.content : d.kind === "docx" ? d.html : d.sha256);
+          const view = (d: LoadedDoc) => (d.kind === "markdown" ? d.content : d.kind === "xlsx" ? d.sha256 : d.html);
           setDoc((prev) => (prev && prev.sha256 === c.sha256 && view(prev) === view(c) ? prev : c));
           setError(null);
         })
@@ -374,7 +377,10 @@ export default function App() {
         };
       }
       if (doc.kind === "xlsx" || docText === null) return lost;
-      const r = resolveAnchor(docText, note.anchor);
+      // PowerPoint: 同じ ID のスライド（並べ替えても変わらない）の中を優先して探す
+      const sid = note.anchor.slideId;
+      const scope = sid !== undefined ? slides.find((s) => s.id === sid) : undefined;
+      const r = resolveAnchor(docText, note.anchor, scope);
       const lines =
         r.status === "ok" && !stale
           ? {
@@ -382,6 +388,8 @@ export default function App() {
               lineEnd: note.anchor.lineEnd,
               paragraph: note.anchor.paragraph,
               heading: note.anchor.heading,
+              slide: note.anchor.slide,
+              slideId: note.anchor.slideId,
             }
           : r.status === "orphaned"
             ? {}
@@ -389,7 +397,7 @@ export default function App() {
       const target: NoteTarget | null = r.status === "orphaned" ? null : { kind: "text", start: r.start, end: r.end };
       return { note, status: r.status, stale, target, sortKey: r.status === "orphaned" ? Infinity : r.start, ...lines };
     });
-  }, [notesFile, docText, doc]);
+  }, [notesFile, docText, doc, slides]);
 
   const sortedViews = useMemo(() => {
     const arr = [...views];
@@ -668,7 +676,10 @@ export default function App() {
                 highlights={highlights}
                 activeId={activeId}
                 pending={draft?.kind === "text" ? draft : null}
-                onTextReady={setDocText}
+                onTextReady={(text, spans) => {
+                  setSlides(spans);
+                  setDocText(text);
+                }}
                 onSelectionChange={(s) => setSelection(s && { kind: "text", ...s })}
                 onAddNote={startDraft}
                 onClickOffset={onClickOffset}

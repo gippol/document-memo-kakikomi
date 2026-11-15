@@ -1,4 +1,4 @@
-import type { AnchorLocation } from "./anchor";
+import type { AnchorLocation, Scope } from "./anchor";
 
 /** 表示 DOM ⇔ テキストオフセットの変換ヘルパー */
 
@@ -64,11 +64,41 @@ export function linesOfRange(range: Range): { lineStart?: number; lineEnd?: numb
   };
 }
 
-/** Range の位置を「段落番号＋直前の見出し」で表す */
+/** PowerPoint のスライドがテキスト上で占める範囲 */
+export interface SlideSpan extends Scope {
+  /** スライド番号（1 始まり） */
+  no: number;
+  id: number;
+  title: string;
+  hidden: boolean;
+}
+
+export function slideSpans(root: Element): SlideSpan[] {
+  return Array.from(root.querySelectorAll<HTMLElement>("section[data-slide]")).map((s) => ({
+    no: Number(s.dataset.slide),
+    id: Number(s.dataset.slideId),
+    title: s.dataset.title ?? "",
+    hidden: s.hasAttribute("data-hidden"),
+    start: offsetOf(root, s, 0),
+    end: offsetOf(root, s, s.childNodes.length),
+  }));
+}
+
+/** Range の位置を「段落番号＋直前の見出し」で表す（PowerPoint は「スライド番号＋そのタイトル」） */
 export function locateInHtml(root: Element, range: Range): AnchorLocation {
   const node = range.startContainer;
   const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
   const block = el?.closest("[data-para]") as HTMLElement | null;
+  const slide = el?.closest("section[data-slide]") as HTMLElement | null;
+  if (slide) {
+    const title = slide.dataset.title || `スライド ${slide.dataset.slide}`;
+    return {
+      paragraph: block ? Number(block.dataset.para) : undefined,
+      heading: (el?.closest(".slide-notes") ? `${title}（発表者ノート）` : title).slice(0, 60),
+      slide: Number(slide.dataset.slide),
+      slideId: Number(slide.dataset.slideId) || undefined,
+    };
+  }
   let heading: string | undefined;
   for (const h of root.querySelectorAll("h1,h2,h3,h4,h5,h6")) {
     const precedes = h.contains(node) || h.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING;

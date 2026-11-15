@@ -46,10 +46,11 @@ const STATUS_TAG: Record<AnchorStatus, { label: string; title: string } | null> 
   orphaned: { label: "LOST", title: "資料から該当箇所が見つかりません" },
 };
 
-/** Markdown は行番号、Word は段落番号、Excel はセル範囲で位置を表す */
+/** Markdown は行番号、Word は段落番号、PowerPoint はスライド番号、Excel はセル範囲で位置を表す */
 function lineLabel(v: NoteView) {
   if (v.status === "orphaned") return "---";
   if (v.cell) return v.cell;
+  if (v.slide !== undefined) return `S${v.slide}`;
   if (v.lineStart !== undefined) {
     return v.lineEnd && v.lineEnd !== v.lineStart ? `L${v.lineStart}-${v.lineEnd}` : `L${v.lineStart}`;
   }
