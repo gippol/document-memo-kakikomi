@@ -3,6 +3,8 @@
 会議資料（Markdown / Word / Excel / PowerPoint）を **一切書き換えず**、資料ごとの別ファイル `<資料名>.notes.json` にメモを残すデスクトップアプリです。
 （Tauri v2 + React + TypeScript + Tailwind CSS）
 
+![サンプル画像](./images/sample.png)
+
 ## 起動
 
 ```sh
