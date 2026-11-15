@@ -1,6 +1,6 @@
 # 資料メモ
 
-会議資料（Markdown / Word / Excel）を **一切書き換えず**、資料ごとの別ファイル `<資料名>.notes.json` にメモを残すデスクトップアプリです。
+会議資料（Markdown / Word / Excel / PowerPoint）を **一切書き換えず**、資料ごとの別ファイル `<資料名>.notes.json` にメモを残すデスクトップアプリです。
 （Tauri v2 + React + TypeScript + Tailwind CSS）
 
 ## 起動
@@ -12,7 +12,7 @@ npm run tauri build   # インストーラ作成
 npm test              # ユニットテスト
 ```
 
-`samples/` フォルダを開くと動作を試せます（`node scripts/make-sample-docx.mjs` / `make-sample-xlsx.mjs` でサンプルの Word / Excel を再生成）。
+`samples/` フォルダを開くと動作を試せます（`node scripts/make-sample-docx.mjs` / `make-sample-xlsx.mjs` / `make-sample-pptx.mjs` でサンプルの Word / Excel / PowerPoint を再生成）。
 
 ## 使い方
 
@@ -42,6 +42,7 @@ npm test              # ユニットテスト
         "start": 25, "end": 35,
         "lineStart": 3, "lineEnd": 3,      // Markdown のとき
         "paragraph": 5, "heading": "2.1 …", // Word のとき
+        "slide": 3, "slideId": 258,          // PowerPoint のとき（heading はスライドのタイトル）
         "sourceSha256": "…ノート作成時の資料のハッシュ"
       }
     }
@@ -73,6 +74,7 @@ Excel のノートはセル範囲に付けます（`anchor.type` が `"cell"`）
 | --- | --- | --- | --- |
 | Markdown (.md) | react-markdown + GFM | ソースの行番号 `L12-14` | ファイルそのもの |
 | Word (.docx) | mammoth.js で構造を HTML 化（見出し・段落・リスト・表・画像・リンク・脚注） | 段落番号 `¶12` ＋ 直前の見出し | 本文テキスト（再保存・書式・見出し設定の変更では変わらない） |
+| PowerPoint (.pptx) | スライドごとに文字のカードとして表示（タイトル・箇条書き・表・発表者ノート、画像などは目印） | スライド番号 `S3` ＋ スライドのタイトル | スライドの文字と発表者ノート（再保存・書式の変更では変わらない） |
 | Excel (.xlsx / .xlsm / .xls) | SheetJS でセルの表示値を表に（シートのタブ・結合セル・列幅・表示形式） | `予算!B3:D5` ＋ 行・列の見出し | シート名とセルの表示値（再保存・書式の変更では変わらない） |
 
 ### Word の見出しスタイル
@@ -100,6 +102,15 @@ Word の制限:
 - テキストボックスや図形内の文字は表示されないことがあります。変換できなかった要素は資料の上部に一覧表示します
 - 古い `.doc` 形式は非対応。Word が開いている間のロックファイル `~$xxx.docx` は一覧・監視から除外します
 
+### PowerPoint
+
+- スライドを縦に並べたカードで表示し、左の「スライド一覧」から各スライドへ移動できます（ノートの件数も表示）
+- 図形の配置・色・アニメーションは再現しません。文字は「タイトル → 上から・左から」の順に並べます
+- 発表者ノートは各スライドの下に表示し、本文と同じようにノートを付けられます
+- 画像・グラフ・動画は `[画像: 代替テキスト]` のような目印だけを表示します。SmartArt は文字だけを取り出します
+- 非表示のスライドも「（非表示）」と付けて表示します
+- 古い `.ppt` 形式は非対応です
+
 ### Excel
 
 - セルの値は Excel の表示形式（桁区切り・日付など）を適用した文字列で表示します。日付の既定の書式は日本語版 Excel に合わせて `2026/4/1` 形式
@@ -121,6 +132,8 @@ SheetJS は npm レジストリの版（0.18.5）が古く既知の脆弱性も�
 | 引用文が変更 | 引用文が書き換わっていた（あいまい検索で推定、波線ハイライト） |
 | 該当箇所なし | 見つからない。テキストを選択して「📍 選択範囲に付け直す」で手動修正 |
 
+PowerPoint の再アンカーは、スライド ID（スライドを並べ替えても変わらない）が同じスライドの中を優先して探し、見つからなければ資料全体から探します。スライドが移動しても、同じ文言が別のスライドにあっても、元のスライドを指し続けます。
+
 Excel の再アンカーは「記録位置に同じ値と見出し → 同じ値の並びを探して見出し一致・近さで選ぶ（行・列の挿入、シート名の変更に追従） → 行・列見出しの交点 → 記録位置の値が半分以上同じ」の順に試します。
 
 ノートの `sourceSha256` が現在の資料と異なると警告バナーが出ます。「現在の版でアンカーを確定」で推定位置を保存します。
@@ -132,6 +145,7 @@ Excel の再アンカーは「記録位置に同じ値と見出し → 同じ値
 - `src/lib/anchor.ts` — アンカー作成と再アンカー（完全一致 → 文脈スコア → diff-match-patch あいまい検索 → 前後文脈）
 - `src/lib/dom.ts` — 表示 DOM ⇔ テキストオフセット変換
 - `src/lib/document.ts` / `docx.ts` — 形式ごとの読み込み（Word は 見出しスタイル判定 → mammoth → DOMPurify → 段落番号付与）
+- `src/lib/pptx.ts` — PowerPoint の読み込み（JSZip でスライドの XML を読み、スライドごとの HTML に）
 - `src/lib/sheet.ts` / `xlsx.ts` — Excel のシートデータとセル範囲アンカー（SheetJS に依存しない） / SheetJS による読み込み
 - `src/lib/config.ts` — フォルダ設定 `.shiryo-memo.json` の読み込み
 - `src/components/Viewer.tsx` — Markdown 表示、選択検知、CSS Custom Highlight API によるハイライト（資料 DOM を変更しない）

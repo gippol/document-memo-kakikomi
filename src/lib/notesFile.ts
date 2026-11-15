@@ -1,7 +1,7 @@
 import type { TextAnchor } from "./anchor";
 import type { CellAnchor } from "./sheet";
 
-/** Markdown・Word はテキスト範囲、Excel はセル範囲にノートを付ける */
+/** Markdown・Word・PowerPoint はテキスト範囲、Excel はセル範囲にノートを付ける */
 export type Anchor = TextAnchor | CellAnchor;
 
 export const NOTES_FILE_VERSION = 1;
@@ -84,6 +84,8 @@ function orderAnchor(a: Anchor) {
     lineEnd: a.lineEnd,
     paragraph: a.paragraph,
     heading: a.heading,
+    slide: a.slide,
+    slideId: a.slideId,
     sourceSha256: a.sourceSha256,
   };
 }

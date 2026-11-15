@@ -64,7 +64,7 @@ function mount(overrides: Partial<Parameters<typeof SheetViewer>[0]> = {}) {
   return { onSelectionChange, onClickCell, ref };
 }
 
-const td = (r: number, c: number) => container.querySelector<HTMLElement>(`td[data-r="${r}"][data-c="${c}"]`)!;
+const td = (r: number, c: number) => container.querySelector<HTMLTableCellElement>(`td[data-r="${r}"][data-c="${c}"]`)!;
 const down = (el: Element, init: MouseEventInit = {}) =>
   act(() => void el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, ...init })));
 

@@ -8,6 +8,9 @@ export interface AnchorLocation {
   /** Word: 段落の通し番号と直前の見出し */
   paragraph?: number;
   heading?: string;
+  /** PowerPoint: スライド番号（表示用）と スライド ID（並べ替えても変わらない。再アンカーの手がかり） */
+  slide?: number;
+  slideId?: number;
 }
 
 /**
@@ -64,6 +67,8 @@ export function createAnchor(
     lineEnd: loc?.lineEnd,
     paragraph: loc?.paragraph,
     heading: loc?.heading,
+    slide: loc?.slide,
+    slideId: loc?.slideId,
     sourceSha256,
   };
 }
@@ -112,8 +117,18 @@ function fuzzyFind(text: string, pattern: string, loc: number): number {
   return dmp.match_main(text, p, Math.max(0, Math.min(loc, text.length)));
 }
 
-/** 現在の表示テキスト上でアンカーの位置を特定する */
-export function resolveAnchor(text: string, anchor: TextAnchor): ResolvedAnchor {
+/** テキスト上の範囲 [start, end) */
+export interface Scope {
+  start: number;
+  end: number;
+}
+
+/**
+ * 現在の表示テキスト上でアンカーの位置を特定する。
+ * scope を渡すと、その範囲（PowerPoint では同じ ID のスライド）の中の候補を優先する。
+ */
+export function resolveAnchor(text: string, anchor: TextAnchor, scope?: Scope | null): ResolvedAnchor {
+  const inScope = (s: number, e: number) => !!scope && s >= scope.start && e <= scope.end;
   const { quote } = anchor;
   if (!quote) return { status: "orphaned", start: 0, end: 0 };
 
@@ -131,7 +146,10 @@ export function resolveAnchor(text: string, anchor: TextAnchor): ResolvedAnchor 
     let best = hits[0];
     let bestScore = -Infinity;
     for (const h of hits) {
-      const score = contextScore(text, anchor, h, h + quote.length) * 1000 - Math.abs(h - anchor.start);
+      const score =
+        (inScope(h, h + quote.length) ? 1e9 : 0) +
+        contextScore(text, anchor, h, h + quote.length) * 1000 -
+        Math.abs(h - anchor.start);
       if (score > bestScore) {
         bestScore = score;
         best = h;
@@ -142,7 +160,9 @@ export function resolveAnchor(text: string, anchor: TextAnchor): ResolvedAnchor 
   }
 
   // 3. あいまい検索（引用文そのものが書き換わっている場合）
-  const head = fuzzyFind(text, quote, anchor.start);
+  //    スライドが移動していたら、移動先のスライドの先頭付近から探す
+  const loc = scope && !inScope(anchor.start, anchor.start) ? scope.start : anchor.start;
+  const head = fuzzyFind(text, quote, loc);
   if (head !== -1) {
     const tailPattern = quote.slice(-32);
     const tailLoc = head + quote.length - tailPattern.length;
