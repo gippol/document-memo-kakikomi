@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileTree } from "./components/FileTree";
+import { OrphanNotes } from "./components/OrphanNotes";
 import { NotesPanel, type NoteTarget, type SortMode } from "./components/NotesPanel";
 import { SheetViewer, type CellSelection, type SheetViewerHandle } from "./components/SheetViewer";
 import { Viewer, type TextSelection, type ViewerHandle } from "./components/Viewer";
@@ -34,14 +35,30 @@ export default function App() {
   const viewerRef = useRef<ViewerHandle>(null);
   const sheetRef = useRef<SheetViewerHandle>(null);
 
-  const { root, docs, currentPath, doc, docText, slides, error, configError, notes, openDoc, pickFolder, onTextReady } =
-    useWorkspace({
-      onBeforeOpen: () => {
-        setDraft(null);
-        setActiveId(null);
-        setSelection(null);
-      },
-    });
+  const {
+    root,
+    docs,
+    orphans,
+    currentPath,
+    doc,
+    docText,
+    slides,
+    error,
+    configError,
+    notice,
+    dismissNotice,
+    relinkNotes,
+    notes,
+    openDoc,
+    pickFolder,
+    onTextReady,
+  } = useWorkspace({
+    onBeforeOpen: () => {
+      setDraft(null);
+      setActiveId(null);
+      setSelection(null);
+    },
+  });
   const { notesFile, notesError, saveState, saveError, conflictNotice, updateNotes } = notes;
 
   // ---------- アンカー解決 ----------
@@ -231,6 +248,14 @@ export default function App() {
             [!] {m}
           </div>
         ))}
+      {notice && (
+        <div className="flex items-start gap-2 border-b border-line px-3 py-1">
+          <span className="min-w-0 flex-1">[i] {notice}</span>
+          <button onClick={dismissNotice} className="btn shrink-0">
+            閉じる
+          </button>
+        </div>
+      )}
       {conflictNotice && (
         <div className="flex items-start gap-2 border-b border-line px-3 py-1 text-bright">
           <span className="min-w-0 flex-1">[!] {conflictNotice}</span>
@@ -265,6 +290,7 @@ export default function App() {
         {treeOpen && (
           <aside className="w-60 shrink-0 overflow-auto border-r border-line">
             <FileTree docs={docs} current={currentPath} onOpen={(p) => void openDoc(p)} />
+            <OrphanNotes orphans={orphans} docs={docs} onRelink={relinkNotes} />
           </aside>
         )}
 

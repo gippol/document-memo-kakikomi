@@ -7,6 +7,19 @@ export interface DocEntry {
   hasNotes: boolean;
 }
 
+/** 対応する資料が見つからない（リネーム・移動・削除で取り残された）ノートファイル */
+export interface OrphanNotes {
+  /** 元の資料の相対パス（ノートファイルのパスから .notes.json を除いたもの） */
+  path: string;
+  /** ノートの件数（読めなければ null） */
+  noteCount: number | null;
+}
+
+export interface DocList {
+  docs: DocEntry[];
+  orphans: OrphanNotes[];
+}
+
 export interface DocContent {
   content: string;
   sha256: string;
@@ -27,7 +40,7 @@ export const api = {
     const r = await open({ directory: true, multiple: false, title: "資料フォルダを開く" });
     return typeof r === "string" ? r : null;
   },
-  listDocuments: (root: string) => invoke<DocEntry[]>("list_documents", { root }),
+  listDocuments: (root: string) => invoke<DocList>("list_documents", { root }),
   readDocument: (root: string, rel: string) => invoke<DocContent>("read_document", { root, rel }),
   readDocumentBytes: (root: string, rel: string) => invoke<ArrayBuffer>("read_document_bytes", { root, rel }),
   readConfig: (root: string) => invoke<string | null>("read_config", { root }),
@@ -41,6 +54,12 @@ export const api = {
   /** 競合した編集を退避し、作成したファイルの相対パスを返す */
   writeNotesBackup: (root: string, rel: string, tag: string, content: string) =>
     invoke<string>("write_notes_backup", { root, rel, tag, content }),
+  /**
+   * 孤立したノートファイルを削除する（付け替え先へ書き込んだ後に使う）。
+   * 資料が存在する場合や、内容が expected から変わっていた場合（NOTES_CONFLICT）は削除しない
+   */
+  deleteOrphanNotes: (root: string, rel: string, expected: string) =>
+    invoke<void>("delete_orphan_notes", { root, rel, expected }),
   /** 資料フォルダを登録して監視を始める。ほかのコマンドはこのフォルダに対してのみ動く */
   openFolder: (root: string) => invoke<void>("open_folder", { root }),
   onFsChanged: (cb: (paths: string[]) => void): Promise<UnlistenFn> =>

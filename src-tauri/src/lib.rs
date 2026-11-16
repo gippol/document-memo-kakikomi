@@ -48,6 +48,22 @@ struct DocEntry {
     has_notes: bool,
 }
 
+/// 対応する資料が見つからない（資料のリネーム・移動・削除で取り残された）ノートファイル
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OrphanNotes {
+    /// 元の資料のルートからの相対パス（ノートファイルのパスから `.notes.json` を除いたもの）
+    path: String,
+    /// ノートの件数（読めなければ None）
+    note_count: Option<usize>,
+}
+
+#[derive(Serialize)]
+struct DocList {
+    docs: Vec<DocEntry>,
+    orphans: Vec<OrphanNotes>,
+}
+
 #[derive(Serialize)]
 struct DocContent {
     content: String,
@@ -153,7 +169,13 @@ fn is_supported(p: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn walk(root: &Path, dir: &Path, out: &mut Vec<DocEntry>) {
+/// ノートファイルに含まれるノートの件数
+fn count_notes(path: &Path) -> Option<usize> {
+    let json: serde_json::Value = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
+    json.get("notes")?.as_array().map(Vec::len)
+}
+
+fn walk(root: &Path, dir: &Path, out: &mut DocList) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
@@ -171,24 +193,40 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<DocEntry>) {
             if let Some(rel) = to_rel(root, &path) {
                 let mut np = path.clone().into_os_string();
                 np.push(NOTES_SUFFIX);
-                out.push(DocEntry {
+                out.docs.push(DocEntry {
                     path: rel,
                     has_notes: Path::new(&np).exists(),
                 });
+            }
+        } else if ft.is_file() {
+            // 対応する資料が無いノートファイル
+            let Some(doc_name) = name.strip_suffix(NOTES_SUFFIX) else { continue };
+            let doc = path.with_file_name(doc_name);
+            if is_supported(&doc) && fs::symlink_metadata(&doc).is_err() {
+                if let Some(rel) = to_rel(root, &doc) {
+                    out.orphans.push(OrphanNotes {
+                        path: rel,
+                        note_count: count_notes(&path),
+                    });
+                }
             }
         }
     }
 }
 
 #[tauri::command]
-fn list_documents(state: State<FolderState>, root: String) -> Result<Vec<DocEntry>, String> {
+fn list_documents(state: State<FolderState>, root: String) -> Result<DocList, String> {
     let (root_path, _) = checked_root(&state, &root)?;
     if !root_path.is_dir() {
         return Err(format!("フォルダが見つかりません: {root}"));
     }
-    let mut out = Vec::new();
+    let mut out = DocList {
+        docs: Vec::new(),
+        orphans: Vec::new(),
+    };
     walk(&root_path, &root_path, &mut out);
-    out.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+    out.docs.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+    out.orphans.sort_by_key(|o| o.path.to_lowercase());
     Ok(out)
 }
 
@@ -316,6 +354,34 @@ fn write_notes_backup(
     Err("退避ファイルを作成できません（同名のファイルが多すぎます）".to_string())
 }
 
+/// 孤立したノートファイル（対応する資料が無いもの）を削除する。付け替え先へ書き込んだ後に使う。
+/// - 資料が存在するノートファイルは削除しない
+/// - ディスク上の内容が expected（付け替えのために読んだ内容）と異なれば削除せず `NOTES_CONFLICT` を返す
+#[tauri::command]
+fn delete_orphan_notes(
+    state: State<FolderState>,
+    root: String,
+    rel: String,
+    expected: String,
+) -> Result<(), String> {
+    let (root_path, canon) = checked_root(&state, &root)?;
+    remove_orphan_notes(&root_path, &canon, &rel, &expected)
+}
+
+fn remove_orphan_notes(root: &Path, canon: &Path, rel: &str, expected: &str) -> Result<(), String> {
+    let doc = resolve(root, rel)?;
+    if fs::symlink_metadata(&doc).is_ok() {
+        return Err(format!("資料が存在するため削除しません: {rel}"));
+    }
+    let Some(path) = resolve_existing(root, canon, &notes_rel(rel))? else {
+        return Ok(());
+    };
+    if !matches_on_disk(&path, Some(expected))? {
+        return Err(NOTES_CONFLICT.to_string());
+    }
+    fs::remove_file(&path).map_err(|e| format!("ノートファイルを削除できません: {e}"))
+}
+
 /// 資料フォルダを開く。以降のコマンドはこのフォルダに対してのみ動く。
 /// - フォルダを監視し、変更されたファイルの相対パスを `fs-changed` イベントで通知する
 /// - 資料内の相対画像を表示できるよう asset プロトコルでこのフォルダを公開する
@@ -376,6 +442,7 @@ pub fn run() {
             read_config,
             write_notes,
             write_notes_backup,
+            delete_orphan_notes,
             open_folder
         ])
         .run(tauri::generate_context!())
@@ -455,6 +522,50 @@ mod tests {
         let (s, enc) = decode_text(&bytes);
         assert_eq!(enc, "UTF-8");
         assert!(s.starts_with(JA));
+    }
+
+    #[test]
+    fn walk_finds_orphan_notes() {
+        let root = temp_dir("orphans");
+        fs::write(root.join("a.md"), "x").unwrap();
+        fs::write(root.join("a.md.notes.json"), r#"{"notes":[{},{}]}"#).unwrap();
+        fs::write(root.join("sub/gone.docx.notes.json"), r#"{"notes":[{}]}"#).unwrap();
+        fs::write(root.join("broken.md.notes.json"), "{").unwrap();
+        // 対応形式でない資料のノート・競合の退避ファイルは対象外
+        fs::write(root.join("x.txt.notes.json"), "{}").unwrap();
+        fs::write(root.join("a.md.notes.conflict-20261117-000000.json"), "{}").unwrap();
+        let mut out = DocList {
+            docs: Vec::new(),
+            orphans: Vec::new(),
+        };
+        walk(&root, &root, &mut out);
+        out.orphans.sort_by(|a, b| a.path.cmp(&b.path));
+        let orphans: Vec<_> = out.orphans.iter().map(|o| (o.path.as_str(), o.note_count)).collect();
+        assert_eq!(orphans, vec![("broken.md", None), ("sub/gone.docx", Some(1))]);
+        assert_eq!(out.docs.len(), 1);
+        assert!(out.docs[0].has_notes);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn remove_orphan_notes_is_guarded() {
+        let root = temp_dir("remove-orphan");
+        let canon = fs::canonicalize(&root).unwrap();
+        fs::write(root.join("a.md"), "x").unwrap();
+        fs::write(root.join("a.md.notes.json"), "A").unwrap();
+        fs::write(root.join("gone.md.notes.json"), "G").unwrap();
+        // 資料があるノートは消さない
+        assert!(remove_orphan_notes(&root, &canon, "a.md", "A").is_err());
+        assert!(root.join("a.md.notes.json").exists());
+        // 内容が変わっていたら消さない
+        assert_eq!(remove_orphan_notes(&root, &canon, "gone.md", "X"), Err(NOTES_CONFLICT.to_string()));
+        assert!(root.join("gone.md.notes.json").exists());
+        assert!(remove_orphan_notes(&root, &canon, "gone.md", "G").is_ok());
+        assert!(!root.join("gone.md.notes.json").exists());
+        // 既に無ければ何もしない
+        assert!(remove_orphan_notes(&root, &canon, "gone.md", "G").is_ok());
+        assert!(remove_orphan_notes(&root, &canon, "../gone.md", "G").is_err());
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

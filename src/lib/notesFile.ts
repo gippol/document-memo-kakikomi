@@ -159,6 +159,21 @@ function orderAnchor(a: Anchor) {
   };
 }
 
+/**
+ * 孤立したノートファイル（source）を、付け替え先の資料のノートファイル（target。無ければ null）に統合する。
+ * ID が重なるノートには新しい ID を振る。読めなかったノートもそのまま引き継ぐ。
+ */
+export function mergeNotesFiles(target: NotesFile | null, source: NotesFile, targetDocPath: string): NotesFile {
+  const base = target ?? emptyNotesFile(targetDocPath);
+  const invalid = [...base.invalid, ...source.invalid];
+  const notes = [...base.notes];
+  for (const n of source.notes) {
+    const taken = notes.some((m) => m.id === n.id) || invalid.some((m) => isObj(m) && m.id === n.id);
+    notes.push(taken ? { ...n, id: nextNoteId(notes, invalid, Date.parse(n.createdAt) || Date.now()) } : n);
+  }
+  return { version: NOTES_FILE_VERSION, source: { file: baseName(targetDocPath) }, notes, invalid };
+}
+
 // ---------- ノート ID ----------
 
 /** Crockford Base32（ULID と同じ文字。I・L・O・U を含まない）を小文字で */

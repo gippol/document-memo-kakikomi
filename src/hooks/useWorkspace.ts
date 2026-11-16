@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, errMsg, type DocEntry } from "../lib/api";
+import { api, errMsg, NOTES_CONFLICT, type DocEntry, type OrphanNotes } from "../lib/api";
 import { CONFIG_FILE, DEFAULT_CONFIG, parseConfig, type FolderConfig } from "../lib/config";
 import { loadDocument, type LoadedDoc } from "../lib/document";
 import type { SlideSpan } from "../lib/dom";
-import { NOTES_SUFFIX } from "../lib/notesFile";
+import { mergeNotesFiles, NOTES_SUFFIX, parseNotesFile, serializeNotesFile } from "../lib/notesFile";
 import { LS_KEYS, lsGet, lsSet } from "../lib/storage";
 import { useNotesStore } from "./useNotesStore";
 
@@ -24,6 +24,8 @@ const TREE_CHANGE = /\.(md|markdown|docx|pptx|xlsx|xlsm|xls|notes\.json)$/i;
 export function useWorkspace({ onBeforeOpen }: Options) {
   const [root, setRoot] = useState<string | null>(null);
   const [docs, setDocs] = useState<DocEntry[]>([]);
+  /** 対応する資料が見つからないノートファイル */
+  const [orphans, setOrphans] = useState<OrphanNotes[]>([]);
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [doc, setDoc] = useState<LoadedDoc | null>(null);
   /** 描画後の表示テキスト（アンカーの基準。Markdown・Word・PowerPoint） */
@@ -32,6 +34,8 @@ export function useWorkspace({ onBeforeOpen }: Options) {
   const [slides, setSlides] = useState<SlideSpan[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
+  /** 操作の結果のお知らせ（閉じるまで表示） */
+  const [notice, setNotice] = useState<string | null>(null);
 
   const rootRef = useRef<string | null>(null);
   const pathRef = useRef<string | null>(null);
@@ -88,7 +92,10 @@ export function useWorkspace({ onBeforeOpen }: Options) {
     const r = rootRef.current;
     if (!r) return;
     try {
-      setDocs(await api.listDocuments(r));
+      const list = await api.listDocuments(r);
+      if (rootRef.current !== r) return;
+      setDocs(list.docs);
+      setOrphans(list.orphans);
     } catch (e) {
       setError(errMsg(e));
     }
@@ -104,7 +111,9 @@ export function useWorkspace({ onBeforeOpen }: Options) {
         rootRef.current = r;
         pathRef.current = null;
         setRoot(r);
-        setDocs(list);
+        setDocs(list.docs);
+        setOrphans(list.orphans);
+        setNotice(null);
         setCurrentPath(null);
         setDoc(null);
         setDocText(null);
@@ -113,13 +122,58 @@ export function useWorkspace({ onBeforeOpen }: Options) {
         lsSet(LS_KEYS.lastRoot, r);
         await loadConfig(r);
         const last = lsGet(LS_KEYS.lastDoc(r));
-        const initial = list.find((d) => d.path === last) ?? list[0];
+        const initial = list.docs.find((d) => d.path === last) ?? list.docs[0];
         if (initial) await openDoc(initial.path);
       } catch (e) {
         setError(errMsg(e));
       }
     },
     [flushSave, openDoc, loadConfig, resetNotes],
+  );
+
+  /**
+   * 孤立したノートファイル（from: 元の資料のパス）を資料 to に付け替える。
+   * to に既にノートがあれば統合する。to へ書き込めてから元のファイルを消す
+   * （どちらも読んだときの内容から外部で変更されていたら中止する）。
+   */
+  const relinkNotes = useCallback(
+    async (from: string, to: string) => {
+      const r = rootRef.current;
+      if (!r) return;
+      await flushSave();
+      let wrote = false;
+      try {
+        const fromJson = await api.readNotes(r, from);
+        if (fromJson === null) throw new Error(`${from}${NOTES_SUFFIX} が見つかりません`);
+        const toJson = await api.readNotes(r, to);
+        let source, target;
+        try {
+          source = parseNotesFile(fromJson, from);
+          target = toJson === null ? null : parseNotesFile(toJson, to);
+        } catch (e) {
+          throw new Error(`ノートファイルを読み込めないため付け替えできません（${errMsg(e)}）`);
+        }
+        const merged = mergeNotesFiles(target, source, to);
+        await api.writeNotes(r, to, serializeNotesFile(merged), toJson);
+        wrote = true;
+        await api.deleteOrphanNotes(r, from, fromJson);
+        const count = source.notes.length + source.invalid.length;
+        setNotice(`${from} のノート ${count}件を ${to} に${target ? "統合" : "付け替え"}しました`);
+      } catch (e) {
+        const msg =
+          e === NOTES_CONFLICT
+            ? "付け替えの途中でノートファイルが外部で変更されました。一覧を更新したので、もう一度お試しください"
+            : errMsg(e);
+        setNotice(
+          wrote
+            ? `${to} へのノートの書き込みは完了しましたが、元の ${from}${NOTES_SUFFIX} を削除できませんでした: ${msg}`
+            : `ノートの付け替えに失敗しました: ${msg}`,
+        );
+      }
+      await refreshDocs();
+      if (wrote && pathRef.current === to) await loadNotes(r, to).catch((e) => setError(errMsg(e)));
+    },
+    [flushSave, refreshDocs, loadNotes],
   );
 
   const pickFolder = async () => {
@@ -166,7 +220,7 @@ export function useWorkspace({ onBeforeOpen }: Options) {
           setDoc((prev) => (prev && prev.sha256 === c.sha256 && view(prev) === view(c) ? prev : c));
           setError(null);
         })
-        .catch((e) => setError(`資料「${cur}」を読み込めません: ${errMsg(e)}（移動・削除された可能性があります）`));
+        .catch((e) => setError(`資料「${cur}」を読み込めません: ${errMsg(e)}（移動・削除された可能性があります。リネーム・移動した場合は、一覧の「孤立したノート」から新しい資料へノートを付け替えられます）`));
     }
     if (paths.includes(cur + NOTES_SUFFIX)) onNotesChanged(r, cur);
   };
@@ -181,12 +235,16 @@ export function useWorkspace({ onBeforeOpen }: Options) {
   return {
     root,
     docs,
+    orphans,
     currentPath,
     doc,
     docText,
     slides,
     error,
     configError,
+    notice,
+    dismissNotice: () => setNotice(null),
+    relinkNotes,
     notes,
     openFolder,
     openDoc,
