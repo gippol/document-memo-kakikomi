@@ -42,11 +42,85 @@ export function rangeFromOffsets(root: Node, start: number, end: number): Range 
   return null;
 }
 
-/** 画面座標の位置にある文字のオフセット */
-export function offsetFromPoint(root: Node, x: number, y: number): number | null {
-  const caret = document.caretRangeFromPoint?.(x, y);
-  if (!caret || !root.contains(caret.startContainer)) return null;
-  return offsetOf(root, caret.startContainer, caret.startOffset);
+/**
+ * コンテナ内のテキストノードと、それぞれの開始オフセットの表。
+ * 描画のたびに 1 回作れば、オフセット ⇔ DOM 位置の変換を全文を走査せずに（二分探索で）行える。
+ * 結果は containerText / offsetOf / rangeFromOffsets と同じ。DOM のテキストが変わったら作り直すこと。
+ */
+export class TextIndex {
+  /** アンカーの基準テキスト（containerText と同じ） */
+  readonly text: string;
+  private readonly nodes: Text[] = [];
+  /** nodes[i] の終了オフセット（単調非減少） */
+  private readonly ends: number[] = [];
+  private readonly indexOf = new Map<Node, number>();
+
+  constructor(private readonly root: Node) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const parts: string[] = [];
+    let pos = 0;
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      const t = node as Text;
+      this.indexOf.set(t, this.nodes.length);
+      this.nodes.push(t);
+      parts.push(t.data);
+      pos += t.data.length;
+      this.ends.push(pos);
+    }
+    this.text = parts.join("");
+  }
+
+  private start(i: number): number {
+    return i === 0 ? 0 : this.ends[i - 1];
+  }
+
+  /** ends[i] が pred を満たす最初の i（無ければ nodes.length） */
+  private firstEnd(pred: (end: number) => boolean, lo = 0): number {
+    let hi = this.nodes.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (pred(this.ends[mid])) hi = mid;
+      else lo = mid + 1;
+    }
+    return lo;
+  }
+
+  /** テキストオフセット範囲 [start, end) の DOM Range（rangeFromOffsets と同じ） */
+  rangeAt(start: number, end: number): Range | null {
+    const si = this.firstEnd((e) => e > start);
+    if (si >= this.nodes.length) return null;
+    const ei = this.firstEnd((e) => e >= end, si);
+    if (ei >= this.nodes.length) return null;
+    const r = document.createRange();
+    r.setStart(this.nodes[si], start - this.start(si));
+    r.setEnd(this.nodes[ei], end - this.start(ei));
+    return r;
+  }
+
+  /** コンテナ先頭から (node, offset) までの文字数（offsetOf と同じ） */
+  offsetOf(node: Node, offset: number): number {
+    const i = this.indexOf.get(node);
+    if (i !== undefined) return this.start(i) + offset;
+    // 要素の境界（例: 段落ごと選択したとき）: 境界より後ろにある最初のテキストノードの開始位置
+    const at = document.createRange();
+    at.setStart(node, offset);
+    let lo = 0;
+    let hi = this.nodes.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (at.comparePoint(this.nodes[mid], 0) >= 0) hi = mid;
+      else lo = mid + 1;
+    }
+    return lo < this.nodes.length ? this.start(lo) : this.text.length;
+  }
+
+  /** 画面座標の位置にある文字のオフセット */
+  offsetFromPoint(x: number, y: number): number | null {
+    const caret = document.caretRangeFromPoint?.(x, y);
+    if (!caret || !this.root.contains(caret.startContainer)) return null;
+    return this.offsetOf(caret.startContainer, caret.startOffset);
+  }
 }
 
 function lineAttr(node: Node, attr: "sl" | "el"): number | undefined {
@@ -73,14 +147,14 @@ export interface SlideSpan extends Scope {
   hidden: boolean;
 }
 
-export function slideSpans(root: Element): SlideSpan[] {
+export function slideSpans(root: Element, index: Pick<TextIndex, "offsetOf"> = { offsetOf: (n, o) => offsetOf(root, n, o) }): SlideSpan[] {
   return Array.from(root.querySelectorAll<HTMLElement>("section[data-slide]")).map((s) => ({
     no: Number(s.dataset.slide),
     id: Number(s.dataset.slideId),
     title: s.dataset.title ?? "",
     hidden: s.hasAttribute("data-hidden"),
-    start: offsetOf(root, s, 0),
-    end: offsetOf(root, s, s.childNodes.length),
+    start: index.offsetOf(s, 0),
+    end: index.offsetOf(s, s.childNodes.length),
   }));
 }
 
