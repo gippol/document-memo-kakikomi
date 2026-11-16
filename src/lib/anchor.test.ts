@@ -69,13 +69,37 @@ describe("notesFile", () => {
     expect(parseNotesFile(json, "docs/spec.md").notes[0]).toEqual(note);
   });
 
-  it("連番IDを採番する", () => {
-    expect(nextNoteId([])).toBe("note-001");
-    expect(nextNoteId([{ id: "note-009" } as Note, { id: "note-002" } as Note])).toBe("note-010");
+  it("ULID 風の ID を採番する（時刻 10 文字 + ランダム 8 文字）", () => {
+    const id = nextNoteId([], [], 1469918176385);
+    expect(id).toMatch(/^note-[0-9a-hjkmnp-tv-z]{18}$/);
+    // 時刻部分は ULID と同じエンコード（ULID 仕様の例 01ARYZ6S41 の小文字）
+    expect(id.slice(5, 15)).toBe("01aryz6s41");
   });
 
-  it("読めなかったノートの ID とも重ならないよう採番する", () => {
-    expect(nextNoteId([{ id: "note-001" } as Note], [{ id: "note-005" }, null])).toBe("note-006");
+  it("作成順に文字列として並ぶ", () => {
+    const a = nextNoteId([], [], 1_000);
+    const b = nextNoteId([], [], 1_001);
+    const c = nextNoteId([], [], Date.parse("2030-01-01T00:00:00Z"));
+    expect([c, b, a].sort()).toEqual([a, b, c]);
+  });
+
+  it("既存・読めなかったノートの ID とは重ならない", () => {
+    const fixed = () => "aaaaaaaa";
+    const taken = nextNoteId([], [], 0, fixed);
+    let n = 0;
+    const seq = (len: number) => (n++ === 0 ? "aaaaaaaa" : "b".repeat(len));
+    expect(nextNoteId([], [{ id: taken }, null], 0, seq)).toBe("note-0000000000bbbbbbbb");
+    n = 0;
+    expect(nextNoteId([{ id: taken } as Note], [], 0, seq)).toBe("note-0000000000bbbbbbbb");
+  });
+
+  it("重複した ID のノートは 2 件目以降に新しい ID を振り直す", () => {
+    const base = { comment: "x", createdAt: "2026-11-15T00:00:00.000Z", updatedAt: "t", anchor: anchorFor(doc, "ここが重要な仕様です") };
+    const json = JSON.stringify({ notes: [{ ...base, id: "note-001" }, { ...base, id: "note-001", comment: "y" }] });
+    const parsed = parseNotesFile(json, "spec.md");
+    expect(parsed.notes[0].id).toBe("note-001");
+    expect(parsed.notes[1].id).not.toBe("note-001");
+    expect(parsed.notes[1].comment).toBe("y");
   });
 
   it("形式が不正なノートは分けて保持し、保存時にそのまま書き戻す", () => {
