@@ -65,12 +65,45 @@ describe("notesFile", () => {
       updatedAt: "2026-11-15T00:00:00.000Z",
       anchor: anchorFor(doc, "ここが重要な仕様です"),
     };
-    const json = serializeNotesFile({ version: 1, source: { file: "spec.md" }, notes: [note] });
+    const json = serializeNotesFile({ version: 1, source: { file: "spec.md" }, notes: [note], invalid: [] });
     expect(parseNotesFile(json, "docs/spec.md").notes[0]).toEqual(note);
   });
 
   it("連番IDを採番する", () => {
     expect(nextNoteId([])).toBe("note-001");
     expect(nextNoteId([{ id: "note-009" } as Note, { id: "note-002" } as Note])).toBe("note-010");
+  });
+
+  it("読めなかったノートの ID とも重ならないよう採番する", () => {
+    expect(nextNoteId([{ id: "note-001" } as Note], [{ id: "note-005" }, null])).toBe("note-006");
+  });
+
+  it("形式が不正なノートは分けて保持し、保存時にそのまま書き戻す", () => {
+    const good = {
+      id: "note-001",
+      comment: "ok",
+      createdAt: "t",
+      updatedAt: "t",
+      anchor: anchorFor(doc, "ここが重要な仕様です"),
+    };
+    const cell = {
+      id: "note-002",
+      comment: "セル",
+      createdAt: "t",
+      updatedAt: "t",
+      anchor: { type: "cell", sheet: "予算", ref: "C4:D4", quote: "1 | 2", values: [["1", "2"]], sourceSha256: "x" },
+    };
+    const broken = [
+      { id: "note-003", comment: "anchor なし", createdAt: "t", updatedAt: "t" },
+      { id: "note-004", comment: "start が文字列", createdAt: "t", updatedAt: "t", anchor: { ...good.anchor, start: "0" } },
+      { ...cell, id: "note-005", anchor: { ...cell.anchor, ref: "不正" } },
+      "文字列",
+    ];
+    const json = JSON.stringify({ version: 1, source: { file: "spec.md" }, notes: [good, cell, ...broken] });
+    const parsed = parseNotesFile(json, "spec.md");
+    expect(parsed.notes.map((n) => n.id)).toEqual(["note-001", "note-002"]);
+    expect(parsed.invalid).toEqual(broken);
+    // 書き戻しても失われない
+    expect(JSON.parse(serializeNotesFile(parsed)).notes.slice(2)).toEqual(broken);
   });
 });

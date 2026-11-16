@@ -538,7 +538,7 @@ export default function App() {
     const now = new Date().toISOString();
     let newId = "";
     updateNotes((f) => {
-      newId = nextNoteId(f.notes);
+      newId = nextNoteId(f.notes, f.invalid);
       return { ...f, notes: [...f.notes, { id: newId, comment, createdAt: now, updatedAt: now, anchor }] };
     });
     setDraft(null);
@@ -698,6 +698,12 @@ export default function App() {
           <button onClick={() => setConflictNotice(null)} className="btn shrink-0">
             閉じる
           </button>
+        </div>
+      )}
+      {notesFile && notesFile.invalid.length > 0 && (
+        <div className="border-b border-line px-3 py-1">
+          <span className="text-bright">[W]</span> {currentPath}
+          {NOTES_SUFFIX} に形式が不正なノートが {notesFile.invalid.length}件あり、表示していません（ファイルにはそのまま残します）
         </div>
       )}
       {staleSummary.total > 0 && (
