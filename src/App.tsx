@@ -277,6 +277,8 @@ export default function App() {
     async (r: string) => {
       await flushSave();
       try {
+        // バックエンドにフォルダを登録してから読む（登録したフォルダ以外は読み書きできない）
+        await api.openFolder(r);
         const list = await api.listDocuments(r);
         rootRef.current = r;
         pathRef.current = null;
@@ -292,7 +294,6 @@ export default function App() {
         setError(null);
         lsSet(LS_ROOT, r);
         await loadConfig(r);
-        await api.watchFolder(r);
         const last = lsGet(lsDocKey(r));
         const initial = list.find((d) => d.path === last) ?? list[0];
         if (initial) await openDoc(initial.path);

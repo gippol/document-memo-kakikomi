@@ -24,7 +24,8 @@ export const api = {
   readNotes: (root: string, rel: string) => invoke<string | null>("read_notes", { root, rel }),
   writeNotes: (root: string, rel: string, content: string) =>
     invoke<void>("write_notes", { root, rel, content }),
-  watchFolder: (root: string) => invoke<void>("watch_folder", { root }),
+  /** 資料フォルダを登録して監視を始める。ほかのコマンドはこのフォルダに対してのみ動く */
+  openFolder: (root: string) => invoke<void>("open_folder", { root }),
   onFsChanged: (cb: (paths: string[]) => void): Promise<UnlistenFn> =>
     listen<string[]>("fs-changed", (e) => cb(e.payload)),
 };

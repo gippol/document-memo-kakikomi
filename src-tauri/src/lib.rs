@@ -16,8 +16,29 @@ const CONFIG_FILE: &str = ".shiryo-memo.json";
 const SUPPORTED_EXT: &[&str] = &["md", "markdown", "docx", "pptx", "xlsx", "xlsm", "xls"];
 const SKIP_DIRS: &[&str] = &["node_modules", "target", "dist"];
 
+/// いま開いている資料フォルダ。各コマンドはここに登録された root に対してのみ動く。
+struct OpenFolder {
+    /// フロントエンドから渡された root（そのままの文字列。照合に使う）
+    root: String,
+    /// 正規化した絶対パス（シンボリックリンク等でフォルダ外に出ていないかの判定に使う）
+    canon: PathBuf,
+    _watcher: RecommendedWatcher,
+}
+
 #[derive(Default)]
-struct WatchState(Mutex<Option<RecommendedWatcher>>);
+struct FolderState(Mutex<Option<OpenFolder>>);
+
+/// 登録済みのフォルダと一致する root か確認し、(root のパス, 正規化したパス) を返す。
+fn checked_root(state: &FolderState, root: &str) -> Result<(PathBuf, PathBuf), String> {
+    let guard = state
+        .0
+        .lock()
+        .map_err(|_| "内部エラー（状態をロックできません）".to_string())?;
+    match guard.as_ref() {
+        Some(f) if f.root == root => Ok((PathBuf::from(&f.root), f.canon.clone())),
+        _ => Err(format!("開いていないフォルダへのアクセスです: {root}")),
+    }
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,7 +55,7 @@ struct DocContent {
 }
 
 /// 相対パスをルート配下に解決する。`..` や絶対パスは拒否。
-fn resolve(root: &str, rel: &str) -> Result<PathBuf, String> {
+fn resolve(root: &Path, rel: &str) -> Result<PathBuf, String> {
     let rel_path = Path::new(rel);
     if rel_path
         .components()
@@ -42,11 +63,39 @@ fn resolve(root: &str, rel: &str) -> Result<PathBuf, String> {
     {
         return Err(format!("不正なパスです: {rel}"));
     }
-    Ok(Path::new(root).join(rel_path))
+    Ok(root.join(rel_path))
 }
 
-fn notes_path(root: &str, rel: &str) -> Result<PathBuf, String> {
-    resolve(root, &format!("{rel}{NOTES_SUFFIX}"))
+/// 実在するパスについて、シンボリックリンク等をたどった先がフォルダ（正規化済み canon）の中か確認する。
+fn ensure_inside(canon: &Path, path: &Path) -> Result<(), String> {
+    let real = fs::canonicalize(path).map_err(|e| format!("パスを確認できません: {e}"))?;
+    if real.starts_with(canon) {
+        Ok(())
+    } else {
+        Err(format!("資料フォルダの外を指すパスです: {}", path.display()))
+    }
+}
+
+/// 読み取り用: ルート配下に解決し、実在すればフォルダ内か確認する。無ければ None。
+fn resolve_existing(root: &Path, canon: &Path, rel: &str) -> Result<Option<PathBuf>, String> {
+    let path = resolve(root, rel)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    ensure_inside(canon, &path)?;
+    Ok(Some(path))
+}
+
+/// 書き込み用: 親フォルダがフォルダ内か確認する（ファイル自体はまだ無くてよい）。
+fn resolve_for_write(root: &Path, canon: &Path, rel: &str) -> Result<PathBuf, String> {
+    let path = resolve(root, rel)?;
+    let parent = path.parent().ok_or_else(|| format!("不正なパスです: {rel}"))?;
+    ensure_inside(canon, parent)?;
+    Ok(path)
+}
+
+fn notes_rel(rel: &str) -> String {
+    format!("{rel}{NOTES_SUFFIX}")
 }
 
 fn to_rel(root: &Path, p: &Path) -> Option<String> {
@@ -93,8 +142,8 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<DocEntry>) {
 }
 
 #[tauri::command]
-fn list_documents(root: String) -> Result<Vec<DocEntry>, String> {
-    let root_path = PathBuf::from(&root);
+fn list_documents(state: State<FolderState>, root: String) -> Result<Vec<DocEntry>, String> {
+    let (root_path, _) = checked_root(&state, &root)?;
     if !root_path.is_dir() {
         return Err(format!("フォルダが見つかりません: {root}"));
     }
@@ -105,8 +154,9 @@ fn list_documents(root: String) -> Result<Vec<DocEntry>, String> {
 }
 
 #[tauri::command]
-fn read_document(root: String, rel: String) -> Result<DocContent, String> {
-    let path = resolve(&root, &rel)?;
+fn read_document(state: State<FolderState>, root: String, rel: String) -> Result<DocContent, String> {
+    let (root_path, canon) = checked_root(&state, &root)?;
+    let path = resolve_existing(&root_path, &canon, &rel)?.ok_or_else(|| format!("資料が見つかりません: {rel}"))?;
     let bytes = fs::read(&path).map_err(|e| format!("資料を読めません: {e}"))?;
     let sha256 = hex::encode(Sha256::digest(&bytes));
     let mut content = String::from_utf8_lossy(&bytes).into_owned();
@@ -118,18 +168,23 @@ fn read_document(root: String, rel: String) -> Result<DocContent, String> {
 
 /// バイナリ資料（.docx など）をそのまま返す。解析はフロントエンド側で行う。
 #[tauri::command]
-fn read_document_bytes(root: String, rel: String) -> Result<Response, String> {
-    let path = resolve(&root, &rel)?;
+fn read_document_bytes(
+    state: State<FolderState>,
+    root: String,
+    rel: String,
+) -> Result<Response, String> {
+    let (root_path, canon) = checked_root(&state, &root)?;
+    let path = resolve_existing(&root_path, &canon, &rel)?.ok_or_else(|| format!("資料が見つかりません: {rel}"))?;
     let bytes = fs::read(&path).map_err(|e| format!("資料を読めません: {e}"))?;
     Ok(Response::new(bytes))
 }
 
 #[tauri::command]
-fn read_notes(root: String, rel: String) -> Result<Option<String>, String> {
-    let path = notes_path(&root, &rel)?;
-    if !path.exists() {
+fn read_notes(state: State<FolderState>, root: String, rel: String) -> Result<Option<String>, String> {
+    let (root_path, canon) = checked_root(&state, &root)?;
+    let Some(path) = resolve_existing(&root_path, &canon, &notes_rel(&rel))? else {
         return Ok(None);
-    }
+    };
     fs::read_to_string(&path)
         .map(Some)
         .map_err(|e| format!("ノートファイルを読めません: {e}"))
@@ -137,11 +192,11 @@ fn read_notes(root: String, rel: String) -> Result<Option<String>, String> {
 
 /// フォルダ直下の設定ファイルを読む（無ければ None）。
 #[tauri::command]
-fn read_config(root: String) -> Result<Option<String>, String> {
-    let path = resolve(&root, CONFIG_FILE)?;
-    if !path.exists() {
+fn read_config(state: State<FolderState>, root: String) -> Result<Option<String>, String> {
+    let (root_path, canon) = checked_root(&state, &root)?;
+    let Some(path) = resolve_existing(&root_path, &canon, CONFIG_FILE)? else {
         return Ok(None);
-    }
+    };
     fs::read_to_string(&path)
         .map(Some)
         .map_err(|e| format!("設定ファイルを読めません: {e}"))
@@ -149,11 +204,21 @@ fn read_config(root: String) -> Result<Option<String>, String> {
 
 /// ノートファイルをアトミックに書き込む（一時ファイル → rename）。
 #[tauri::command]
-fn write_notes(root: String, rel: String, content: String) -> Result<(), String> {
-    let path = notes_path(&root, &rel)?;
+fn write_notes(
+    state: State<FolderState>,
+    root: String,
+    rel: String,
+    content: String,
+) -> Result<(), String> {
+    let (root_path, canon) = checked_root(&state, &root)?;
+    let path = resolve_for_write(&root_path, &canon, &notes_rel(&rel))?;
     let mut tmp = path.clone().into_os_string();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
+    // 一時ファイルの名前でリンクが置かれていても、たどった先には書かない
+    if fs::symlink_metadata(&tmp).is_ok() {
+        fs::remove_file(&tmp).map_err(|e| format!("保存に失敗しました: {e}"))?;
+    }
     fs::write(&tmp, content.as_bytes()).map_err(|e| format!("保存に失敗しました: {e}"))?;
     fs::rename(&tmp, &path).map_err(|e| {
         let _ = fs::remove_file(&tmp);
@@ -161,12 +226,17 @@ fn write_notes(root: String, rel: String, content: String) -> Result<(), String>
     })
 }
 
-/// フォルダを監視し、変更されたファイルの相対パスを `fs-changed` イベントで通知する。
-/// あわせて、資料内の相対画像を表示できるよう asset プロトコルでこのフォルダだけを公開する
-/// （tauri.conf.json の scope は空。フォルダ外のファイルは表示できない）。
+/// 資料フォルダを開く。以降のコマンドはこのフォルダに対してのみ動く。
+/// - フォルダを監視し、変更されたファイルの相対パスを `fs-changed` イベントで通知する
+/// - 資料内の相対画像を表示できるよう asset プロトコルでこのフォルダを公開する
+///   （tauri.conf.json の scope は空。開いていないフォルダのファイルは表示できない）
 #[tauri::command]
-fn watch_folder(app: AppHandle, state: State<WatchState>, root: String) -> Result<(), String> {
+fn open_folder(app: AppHandle, state: State<FolderState>, root: String) -> Result<(), String> {
     let root_path = PathBuf::from(&root);
+    if !root_path.is_absolute() || !root_path.is_dir() {
+        return Err(format!("フォルダが見つかりません: {root}"));
+    }
+    let canon = fs::canonicalize(&root_path).map_err(|e| format!("フォルダを開けません: {e}"))?;
     app.asset_protocol_scope()
         .allow_directory(&root_path, true)
         .map_err(|e| format!("フォルダを公開できません: {e}"))?;
@@ -190,7 +260,15 @@ fn watch_folder(app: AppHandle, state: State<WatchState>, root: String) -> Resul
     watcher
         .watch(&root_path, RecursiveMode::Recursive)
         .map_err(|e| e.to_string())?;
-    *state.0.lock().unwrap() = Some(watcher);
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "内部エラー（状態をロックできません）".to_string())?;
+    *guard = Some(OpenFolder {
+        root,
+        canon,
+        _watcher: watcher,
+    });
     Ok(())
 }
 
@@ -199,7 +277,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .manage(WatchState::default())
+        .manage(FolderState::default())
         .invoke_handler(tauri::generate_handler![
             list_documents,
             read_document,
@@ -207,8 +285,54 @@ pub fn run() {
             read_notes,
             read_config,
             write_notes,
-            watch_folder
+            open_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("shiryo-memo-test-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(d.join("sub")).unwrap();
+        d
+    }
+
+    #[test]
+    fn resolve_rejects_parent_and_absolute() {
+        let root = Path::new("root");
+        assert!(resolve(root, "a/b.md").is_ok());
+        assert!(resolve(root, "../x.md").is_err());
+        assert!(resolve(root, "a/../../x.md").is_err());
+        assert!(resolve(root, "./a.md").is_err());
+        #[cfg(windows)]
+        assert!(resolve(root, "C:\\x.md").is_err());
+        #[cfg(unix)]
+        assert!(resolve(root, "/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn resolve_existing_and_for_write_stay_inside() {
+        let root = temp_dir("inside");
+        let canon = fs::canonicalize(&root).unwrap();
+        fs::write(root.join("sub/a.md"), "x").unwrap();
+
+        assert!(resolve_existing(&root, &canon, "sub/a.md").unwrap().is_some());
+        assert!(resolve_existing(&root, &canon, "sub/none.md").unwrap().is_none());
+        assert!(resolve_for_write(&root, &canon, "sub/a.md.notes.json").is_ok());
+        // 親フォルダが存在しない書き込みは拒否
+        assert!(resolve_for_write(&root, &canon, "nodir/a.md.notes.json").is_err());
+
+        // 正規化したパスが root の外なら拒否
+        let other = temp_dir("other");
+        fs::write(other.join("b.md"), "y").unwrap();
+        assert!(ensure_inside(&canon, &other.join("b.md")).is_err());
+
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&other);
+    }
 }
