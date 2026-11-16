@@ -13,7 +13,7 @@ import type { SheetBook } from "./sheet";
  * - PowerPoint: スライドの文字（発表者ノートを含む）のハッシュ（Word と同じ理由）
  */
 export type LoadedDoc =
-  | { kind: "markdown"; content: string; sha256: string }
+  | { kind: "markdown"; content: string; sha256: string; encoding: string }
   | { kind: "docx"; html: string; sha256: string; warnings: string[]; headingStyles: Record<string, number> }
   | { kind: "xlsx"; book: SheetBook; sha256: string; warnings: string[] }
   | { kind: "pptx"; html: string; sha256: string; warnings: string[]; slideCount: number };
@@ -38,8 +38,8 @@ export function docKind(path: string): DocKind | null {
 async function loadOnce(root: string, path: string, opts: LoadOptions): Promise<LoadedDoc> {
   const kind = docKind(path);
   if (kind === "markdown") {
-    const { content, sha256 } = await api.readDocument(root, path);
-    return { kind, content, sha256 };
+    const { content, sha256, encoding } = await api.readDocument(root, path);
+    return { kind, content, sha256, encoding };
   }
   if (kind === "docx") {
     const bytes = await api.readDocumentBytes(root, path);

@@ -1,507 +1,76 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileTree } from "./components/FileTree";
-import { NotesPanel, type NoteTarget, type NoteView, type SortMode } from "./components/NotesPanel";
-import { SheetViewer, type CellHighlight, type CellSelection, type SheetViewerHandle } from "./components/SheetViewer";
-import { Viewer, type HighlightSpec, type TextSelection, type ViewerHandle } from "./components/Viewer";
-import { createAnchor, resolveAnchor } from "./lib/anchor";
-import type { SlideSpan } from "./lib/dom";
-import { api, NOTES_CONFLICT, type DocEntry } from "./lib/api";
-import { CONFIG_FILE, DEFAULT_CONFIG, parseConfig, type FolderConfig } from "./lib/config";
-import { loadDocument, type LoadedDoc } from "./lib/document";
-import { createCellAnchor, formatRef, headerLabel, headersAt, resolveCellAnchor } from "./lib/sheet";
-import {
-  type Anchor,
-  emptyNotesFile,
-  nextNoteId,
-  NOTES_SUFFIX,
-  parseNotesFile,
-  serializeNotesFile,
-  type NotesFile,
-} from "./lib/notesFile";
-
-type SaveState = "none" | "pending" | "saving" | "saved" | "error";
+import { OrphanNotes } from "./components/OrphanNotes";
+import { NotesPanel, type NoteTarget, type SortMode } from "./components/NotesPanel";
+import { SheetViewer, type CellSelection, type SheetViewerHandle } from "./components/SheetViewer";
+import { Viewer, type TextSelection, type ViewerHandle } from "./components/Viewer";
+import { usePaneLayout, PANE_MIN } from "./hooks/usePaneLayout";
+import type { SaveState } from "./hooks/useNotesStore";
+import { useWorkspace } from "./hooks/useWorkspace";
+import { createAnchor } from "./lib/anchor";
+import { buildNoteViews, cellHighlights as toCellHighlights, sortNoteViews, summarizeStale, textHighlights } from "./lib/noteViews";
+import { type Anchor, nextNoteId, NOTES_SUFFIX } from "./lib/notesFile";
+import { createCellAnchor, formatRef } from "./lib/sheet";
 
 /** 資料上の選択（Markdown・Word: テキスト範囲 / Excel: セル範囲） */
 type DocSelection = ({ kind: "text" } & TextSelection) | ({ kind: "cell" } & CellSelection);
 
-interface PendingSave {
-  root: string;
-  path: string;
-  json: string;
-}
-
-const LS_ROOT = "document-memo-kakikomi:lastRoot";
-const lsDocKey = (root: string) => `document-memo-kakikomi:lastDoc:${root}`;
-const SAVE_DELAY = 500;
-
-/** 資料とノートの配置: side = 左右, stack = 上下 */
-type Layout = "side" | "stack";
-const LS_LAYOUT = "document-memo-kakikomi:layout";
-const lsPaneKey = (l: Layout) => `document-memo-kakikomi:notesSize:${l}`;
-/** ノート欄の既定サイズ（side: 幅, stack: 高さ, px） */
-const PANE_DEFAULT: Record<Layout, number> = { side: 380, stack: 280 };
-const PANE_MIN = 160;
-
-function lsGet(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-function lsSet(key: string, v: string) {
-  try {
-    localStorage.setItem(key, v);
-  } catch {
-    /* noop */
-  }
-}
-
-/** 退避ファイル名に付ける日時（例: 20261117-041300） */
-function backupTag(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
-}
-
-function errMsg(e: unknown) {
-  return typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
-}
+const SAVE_LABEL: Record<SaveState, string> = {
+  none: "NOTES: ---",
+  pending: "NOTES: *未保存",
+  saving: "NOTES: 保存中...",
+  saved: "NOTES: 保存済",
+  error: "NOTES: ERR",
+};
 
 export default function App() {
-  const [root, setRoot] = useState<string | null>(null);
-  const [docs, setDocs] = useState<DocEntry[]>([]);
-  const [currentPath, setCurrentPath] = useState<string | null>(null);
-  const [doc, setDoc] = useState<LoadedDoc | null>(null);
-  const [docText, setDocText] = useState<string | null>(null);
-  /** PowerPoint: 各スライドが表示テキスト上で占める範囲 */
-  const [slides, setSlides] = useState<SlideSpan[]>([]);
-  const [notesFile, setNotesFile] = useState<NotesFile | null>(null);
-  const [notesError, setNotesError] = useState<string | null>(null);
-  const [saveState, setSaveState] = useState<SaveState>("none");
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [configError, setConfigError] = useState<string | null>(null);
-  /** ノートファイルの保存が外部の変更と競合したときの通知（閉じるまで表示） */
-  const [conflictNotice, setConflictNotice] = useState<string | null>(null);
   const [selection, setSelection] = useState<DocSelection | null>(null);
   const [draft, setDraft] = useState<DocSelection | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [focusTick, setFocusTick] = useState(0);
   const [sortMode, setSortMode] = useState<SortMode>("position");
   const [treeOpen, setTreeOpen] = useState(true);
-  const [layout, setLayout] = useState<Layout>(() => (lsGet(LS_LAYOUT) === "stack" ? "stack" : "side"));
-  const [paneSize, setPaneSize] = useState<Record<Layout, number>>(() => ({
-    side: Number(lsGet(lsPaneKey("side"))) || PANE_DEFAULT.side,
-    stack: Number(lsGet(lsPaneKey("stack"))) || PANE_DEFAULT.stack,
-  }));
-  const splitRef = useRef<HTMLDivElement>(null);
-
-  const toggleLayout = () => {
-    const next: Layout = layout === "side" ? "stack" : "side";
-    lsSet(LS_LAYOUT, next);
-    setLayout(next);
-  };
-
-  // 境界線のドラッグでノート欄のサイズを変える
-  const startResize = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const box = splitRef.current?.getBoundingClientRect();
-    if (!box) return;
-    e.preventDefault();
-    const handle = e.currentTarget;
-    handle.setPointerCapture(e.pointerId);
-    const l = layout;
-    let size = paneSize[l];
-    const onMove = (ev: PointerEvent) => {
-      const total = l === "side" ? box.width : box.height;
-      const raw = l === "side" ? box.right - ev.clientX : box.bottom - ev.clientY;
-      size = Math.round(Math.min(Math.max(raw, PANE_MIN), total - PANE_MIN));
-      setPaneSize((p) => ({ ...p, [l]: size }));
-    };
-    const onUp = () => {
-      handle.removeEventListener("pointermove", onMove);
-      handle.removeEventListener("pointerup", onUp);
-      handle.removeEventListener("pointercancel", onUp);
-      lsSet(lsPaneKey(l), String(size));
-    };
-    handle.addEventListener("pointermove", onMove);
-    handle.addEventListener("pointerup", onUp);
-    handle.addEventListener("pointercancel", onUp);
-  };
+  const { layout, toggleLayout, paneSize, splitRef, startResize } = usePaneLayout();
 
   const viewerRef = useRef<ViewerHandle>(null);
   const sheetRef = useRef<SheetViewerHandle>(null);
-  const rootRef = useRef<string | null>(null);
-  const pathRef = useRef<string | null>(null);
-  const notesRef = useRef<NotesFile | null>(null);
-  const configRef = useRef<FolderConfig>(DEFAULT_CONFIG);
-  /** 資料ごとに、ディスク上にあるはずのノートファイルの内容（最後に読んだ／書いたもの。null はファイルが無い） */
-  const lastWritten = useRef(new Map<string, string | null>());
-  const pendingSave = useRef<PendingSave | null>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ---------- ノートの読み込み ----------
-
-  const loadNotes = useCallback(async (r: string, path: string) => {
-    const json = await api.readNotes(r, path);
-    lastWritten.current.set(path, json);
-    if (json === null) {
-      notesRef.current = null;
-      setNotesFile(null);
-      setNotesError(null);
-      setSaveState("none");
-      return;
-    }
-    try {
-      const parsed = parseNotesFile(json, path);
-      notesRef.current = parsed;
-      setNotesFile(parsed);
-      setNotesError(null);
-      setSaveState("saved");
-    } catch (e) {
-      // 壊れたファイルを上書きしないよう、編集をロックする
-      notesRef.current = null;
-      setNotesFile(null);
-      setNotesError(`${path}${NOTES_SUFFIX} を読み込めません: ${errMsg(e)}（上書き防止のため編集をロックしています）`);
-      setSaveState("error");
-    }
-  }, []);
-
-  // ---------- 保存 ----------
-
-  /**
-   * 保存しようとしたら外部（git pull・同期フォルダなど）でノートファイルが変更されていた。
-   * 外部の変更を上書きしないよう、こちらの編集は別ファイルに退避し、外部の内容を読み込み直す。
-   */
-  const resolveConflict = useCallback(
-    async (p: PendingSave) => {
-      // まだ書いていない、より新しい編集があればそれを退避する（読み込み直した内容を上書きさせない）
-      let json = p.json;
-      const later = pendingSave.current;
-      if (later && later.root === p.root && later.path === p.path) {
-        json = later.json;
-        pendingSave.current = null;
-        if (saveTimer.current) clearTimeout(saveTimer.current);
-        saveTimer.current = null;
-      }
-      const isCurrent = () => rootRef.current === p.root && pathRef.current === p.path;
-      let backup: string;
-      try {
-        backup = await api.writeNotesBackup(p.root, p.path, backupTag(new Date()), json);
-      } catch (e) {
-        // 退避できなかった編集は画面上に残す（読み込み直さない）
-        if (isCurrent()) {
-          setSaveState("error");
-          setSaveError(`ノートファイルが外部で変更されていたため保存を中止しましたが、編集の退避にも失敗しました: ${errMsg(e)}`);
-        }
-        return;
-      }
-      setConflictNotice(
-        `${p.path}${NOTES_SUFFIX} が外部で変更されていたため上書きしませんでした。こちらの編集は ${backup} に退避し、外部の内容を読み込み直しました`,
-      );
-      if (isCurrent()) {
-        setSaveError(null);
-        await loadNotes(p.root, p.path).catch((e) => {
-          setSaveState("error");
-          setSaveError(`ノートファイルを読み込み直せません: ${errMsg(e)}`);
-        });
-      }
-    },
-    [loadNotes],
-  );
-
-  const writeNow = useCallback(
-    async (p: PendingSave) => {
-      if (pendingSave.current === p) pendingSave.current = null;
-      if (pathRef.current === p.path) setSaveState("saving");
-      const expected = lastWritten.current.get(p.path) ?? null;
-      // 自分の書き込みによる変更通知を無視できるよう、先に記録しておく
-      lastWritten.current.set(p.path, p.json);
-      try {
-        await api.writeNotes(p.root, p.path, p.json, expected);
-        if (pathRef.current === p.path) {
-          setSaveState(pendingSave.current ? "pending" : "saved");
-          setSaveError(null);
-        }
-        setDocs((ds) => ds.map((d) => (d.path === p.path && !d.hasNotes ? { ...d, hasNotes: true } : d)));
-      } catch (e) {
-        lastWritten.current.set(p.path, expected);
-        if (e === NOTES_CONFLICT) {
-          await resolveConflict(p);
-          return;
-        }
-        if (pathRef.current === p.path) {
-          setSaveState("error");
-          setSaveError(errMsg(e));
-        }
-      }
-    },
-    [resolveConflict],
-  );
-
-  const flushSave = useCallback(async () => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = null;
-    const p = pendingSave.current;
-    if (p) await writeNow(p);
-  }, [writeNow]);
-
-  const commitNotes = useCallback(
-    (next: NotesFile) => {
-      const r = rootRef.current;
-      const path = pathRef.current;
-      if (!r || !path) return;
-      notesRef.current = next;
-      setNotesFile(next);
-      const p: PendingSave = { root: r, path, json: serializeNotesFile(next) };
-      pendingSave.current = p;
-      setSaveState("pending");
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
-        saveTimer.current = null;
-        void writeNow(p);
-      }, SAVE_DELAY);
-    },
-    [writeNow],
-  );
-
-  const updateNotes = useCallback(
-    (fn: (f: NotesFile) => NotesFile) => {
-      const path = pathRef.current;
-      if (!path || notesError) return;
-      commitNotes(fn(notesRef.current ?? emptyNotesFile(path)));
-    },
-    [commitNotes, notesError],
-  );
-
-  // ウィンドウを閉じる前に未保存分を書き出す
-  useEffect(() => {
-    const un = getCurrentWindow().onCloseRequested(async () => {
-      await flushSave();
-    });
-    return () => {
-      void un.then((f) => f());
-    };
-  }, [flushSave]);
-
-  // ---------- 資料の読み込み ----------
-
-  /** フォルダ直下の .document-memo-kakikomi.json を読む。壊れていても既定値で続行する */
-  const loadConfig = useCallback(async (r: string) => {
-    let next = DEFAULT_CONFIG;
-    try {
-      const json = await api.readConfig(r);
-      if (json !== null) next = parseConfig(json);
-      setConfigError(null);
-    } catch (e) {
-      setConfigError(`設定ファイル ${CONFIG_FILE}: ${errMsg(e)}（既定の設定で表示しています）`);
-    }
-    configRef.current = next;
-  }, []);
-
-  const docOptions = () => ({ docxHeadings: configRef.current.docxHeadings });
-
-  const openDoc = useCallback(
-    async (path: string) => {
-      const r = rootRef.current;
-      if (!r) return;
-      await flushSave();
+  const {
+    root,
+    docs,
+    orphans,
+    currentPath,
+    doc,
+    docText,
+    slides,
+    error,
+    configError,
+    notice,
+    dismissNotice,
+    relinkNotes,
+    notes,
+    openDoc,
+    pickFolder,
+    onTextReady,
+  } = useWorkspace({
+    onBeforeOpen: () => {
       setDraft(null);
       setActiveId(null);
       setSelection(null);
-      try {
-        const content = await loadDocument(r, path, docOptions());
-        pathRef.current = path;
-        setCurrentPath(path);
-        setDoc(content);
-        await loadNotes(r, path);
-        setError(null);
-        lsSet(lsDocKey(r), path);
-      } catch (e) {
-        setError(errMsg(e));
-      }
     },
-    [flushSave, loadNotes],
-  );
-
-  const refreshDocs = useCallback(async () => {
-    const r = rootRef.current;
-    if (!r) return;
-    try {
-      setDocs(await api.listDocuments(r));
-    } catch (e) {
-      setError(errMsg(e));
-    }
-  }, []);
-
-  const openFolder = useCallback(
-    async (r: string) => {
-      await flushSave();
-      try {
-        // バックエンドにフォルダを登録してから読む（登録したフォルダ以外は読み書きできない）
-        await api.openFolder(r);
-        const list = await api.listDocuments(r);
-        rootRef.current = r;
-        pathRef.current = null;
-        setRoot(r);
-        setDocs(list);
-        setCurrentPath(null);
-        setDoc(null);
-        setDocText(null);
-        notesRef.current = null;
-        setNotesFile(null);
-        setNotesError(null);
-        setSaveState("none");
-        setError(null);
-        lsSet(LS_ROOT, r);
-        await loadConfig(r);
-        const last = lsGet(lsDocKey(r));
-        const initial = list.find((d) => d.path === last) ?? list[0];
-        if (initial) await openDoc(initial.path);
-      } catch (e) {
-        setError(errMsg(e));
-      }
-    },
-    [flushSave, openDoc, loadConfig],
-  );
-
-  useEffect(() => {
-    const last = lsGet(LS_ROOT);
-    if (last) void openFolder(last);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ---------- 外部での変更検知 ----------
-
-  const handleFsChange = useRef<(paths: string[]) => void>(() => {});
-  const treeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  handleFsChange.current = (paths: string[]) => {
-    const r = rootRef.current;
-    const cur = pathRef.current;
-    if (!r) return;
-
-    if (paths.some((p) => /\.(md|markdown|docx|pptx|xlsx|xlsm|xls|notes\.json)$/i.test(p) || !/\.[^/]+$/.test(p))) {
-      if (treeTimer.current) clearTimeout(treeTimer.current);
-      treeTimer.current = setTimeout(() => void refreshDocs(), 300);
-    }
-    if (!cur) return;
-
-    const configChanged = paths.includes(CONFIG_FILE);
-    if (paths.includes(cur) || configChanged) {
-      (configChanged ? loadConfig(r) : Promise.resolve())
-        .then(() => loadDocument(r, cur, docOptions()))
-        .then((c) => {
-          if (pathRef.current !== cur) return;
-          // 表示内容が同じなら再描画しない（Word は見出し設定の変更でハッシュは同じでも HTML が変わる）
-          const view = (d: LoadedDoc) => (d.kind === "markdown" ? d.content : d.kind === "xlsx" ? d.sha256 : d.html);
-          setDoc((prev) => (prev && prev.sha256 === c.sha256 && view(prev) === view(c) ? prev : c));
-          setError(null);
-        })
-        .catch((e) => setError(`資料「${cur}」を読み込めません: ${errMsg(e)}（移動・削除された可能性があります）`));
-    }
-    if (paths.includes(cur + NOTES_SUFFIX) && !pendingSave.current) {
-      api.readNotes(r, cur).then((json) => {
-        if (pathRef.current !== cur || pendingSave.current) return;
-        if (json !== null && json === lastWritten.current.get(cur)) return; // 自分の書き込み
-        void loadNotes(r, cur);
-      });
-    }
-  };
-
-  useEffect(() => {
-    const un = api.onFsChanged((paths) => handleFsChange.current(paths));
-    return () => {
-      void un.then((f) => f());
-    };
-  }, []);
+  });
+  const { notesFile, notesError, saveState, saveError, conflictNotice, updateNotes } = notes;
 
   // ---------- アンカー解決 ----------
 
-  const views: NoteView[] = useMemo(() => {
-    if (!notesFile || !doc) return [];
-    return notesFile.notes.map((note): NoteView => {
-      const stale = note.anchor.sourceSha256 !== doc.sha256;
-      const lost: NoteView = { note, status: "orphaned", stale, target: null, sortKey: Infinity };
-      if (note.anchor.type === "cell") {
-        if (doc.kind !== "xlsx") return lost;
-        const r = resolveCellAnchor(doc.book, note.anchor);
-        if (r.status === "orphaned") return lost;
-        const idx = doc.book.sheets.findIndex((s) => s.name === r.sheet);
-        const sheet = doc.book.sheets[idx];
-        return {
-          note,
-          status: r.status,
-          stale,
-          target: { kind: "cell", sheet: r.sheet, range: r.range },
-          cell: `${r.sheet}!${formatRef(r.range)}`,
-          heading: headerLabel(r.status === "ok" ? note.anchor : headersAt(sheet, r.range.r1, r.range.c1)),
-          sortKey: idx * 1e8 + r.range.r1 * 1e3 + r.range.c1,
-        };
-      }
-      if (doc.kind === "xlsx" || docText === null) return lost;
-      // PowerPoint: 同じ ID のスライド（並べ替えても変わらない）の中を優先して探す
-      const sid = note.anchor.slideId;
-      const scope = sid !== undefined ? slides.find((s) => s.id === sid) : undefined;
-      const r = resolveAnchor(docText, note.anchor, scope);
-      const lines =
-        r.status === "ok" && !stale
-          ? {
-              lineStart: note.anchor.lineStart,
-              lineEnd: note.anchor.lineEnd,
-              paragraph: note.anchor.paragraph,
-              heading: note.anchor.heading,
-              slide: note.anchor.slide,
-              slideId: note.anchor.slideId,
-            }
-          : r.status === "orphaned"
-            ? {}
-            : (viewerRef.current?.locate(r.start, r.end) ?? {});
-      const target: NoteTarget | null = r.status === "orphaned" ? null : { kind: "text", start: r.start, end: r.end };
-      return { note, status: r.status, stale, target, sortKey: r.status === "orphaned" ? Infinity : r.start, ...lines };
-    });
-  }, [notesFile, docText, doc, slides]);
-
-  const sortedViews = useMemo(() => {
-    const arr = [...views];
-    if (sortMode === "position") {
-      arr.sort((a, b) => {
-        const ao = a.status === "orphaned" ? 1 : 0;
-        const bo = b.status === "orphaned" ? 1 : 0;
-        return ao - bo || a.sortKey - b.sortKey;
-      });
-    } else {
-      arr.sort((a, b) => b.note.createdAt.localeCompare(a.note.createdAt));
-    }
-    return arr;
-  }, [views, sortMode]);
-
-  const highlights: HighlightSpec[] = useMemo(
-    () =>
-      views.flatMap((v) =>
-        v.target?.kind === "text" ? [{ id: v.note.id, start: v.target.start, end: v.target.end, stale: v.status === "fuzzy" }] : [],
-      ),
-    [views],
+  const views = useMemo(
+    () => buildNoteViews(notesFile, doc, docText, slides, (s, e) => viewerRef.current?.locate(s, e) ?? {}),
+    [notesFile, docText, doc, slides],
   );
-
-  const cellHighlights: CellHighlight[] = useMemo(
-    () =>
-      views.flatMap((v) =>
-        v.target?.kind === "cell" ? [{ id: v.note.id, sheet: v.target.sheet, range: v.target.range, stale: v.status === "fuzzy" }] : [],
-      ),
-    [views],
-  );
-
-  const staleSummary = useMemo(() => {
-    const s = { total: 0, moved: 0, fuzzy: 0, orphaned: 0 };
-    for (const v of views) {
-      if (!v.stale && v.status === "ok") continue;
-      s.total++;
-      if (v.status === "moved") s.moved++;
-      if (v.status === "fuzzy") s.fuzzy++;
-      if (v.status === "orphaned") s.orphaned++;
-    }
-    return s;
-  }, [views]);
+  const sortedViews = useMemo(() => sortNoteViews(views, sortMode), [views, sortMode]);
+  const highlights = useMemo(() => textHighlights(views), [views]);
+  const cellHighlights = useMemo(() => toCellHighlights(views), [views]);
+  const staleSummary = useMemo(() => summarizeStale(views), [views]);
 
   // ---------- 操作 ----------
 
@@ -624,20 +193,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [startDraft]);
 
-  const pickFolder = async () => {
-    const r = await api.pickFolder();
-    if (r) await openFolder(r);
-  };
-
   // ---------- 描画 ----------
-
-  const SAVE_LABEL: Record<SaveState, string> = {
-    none: "NOTES: ---",
-    pending: "NOTES: *未保存",
-    saving: "NOTES: 保存中...",
-    saved: "NOTES: 保存済",
-    error: "NOTES: ERR",
-  };
 
   if (!root) {
     return (
@@ -692,10 +248,18 @@ export default function App() {
             [!] {m}
           </div>
         ))}
+      {notice && (
+        <div className="flex items-start gap-2 border-b border-line px-3 py-1">
+          <span className="min-w-0 flex-1">[i] {notice}</span>
+          <button onClick={dismissNotice} className="btn shrink-0">
+            閉じる
+          </button>
+        </div>
+      )}
       {conflictNotice && (
         <div className="flex items-start gap-2 border-b border-line px-3 py-1 text-bright">
           <span className="min-w-0 flex-1">[!] {conflictNotice}</span>
-          <button onClick={() => setConflictNotice(null)} className="btn shrink-0">
+          <button onClick={notes.dismissConflict} className="btn shrink-0">
             閉じる
           </button>
         </div>
@@ -726,6 +290,7 @@ export default function App() {
         {treeOpen && (
           <aside className="w-60 shrink-0 overflow-auto border-r border-line">
             <FileTree docs={docs} current={currentPath} onOpen={(p) => void openDoc(p)} />
+            <OrphanNotes orphans={orphans} docs={docs} onRelink={relinkNotes} />
           </aside>
         )}
 
@@ -752,10 +317,7 @@ export default function App() {
                 highlights={highlights}
                 activeId={activeId}
                 pending={draft?.kind === "text" ? draft : null}
-                onTextReady={(text, spans) => {
-                  setSlides(spans);
-                  setDocText(text);
-                }}
+                onTextReady={onTextReady}
                 onSelectionChange={(s) => setSelection(s && { kind: "text", ...s })}
                 onAddNote={startDraft}
                 onClickOffset={onClickOffset}
@@ -777,8 +339,8 @@ export default function App() {
             className="min-h-0 min-w-0 shrink-0"
             style={
               layout === "side"
-                ? { width: paneSize.side, maxWidth: `calc(100% - ${PANE_MIN}px)` }
-                : { height: paneSize.stack, maxHeight: `calc(100% - ${PANE_MIN}px)` }
+                ? { width: paneSize, maxWidth: `calc(100% - ${PANE_MIN}px)` }
+                : { height: paneSize, maxHeight: `calc(100% - ${PANE_MIN}px)` }
             }
           >
             {currentPath && (

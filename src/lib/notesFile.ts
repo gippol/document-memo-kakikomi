@@ -51,7 +51,7 @@ export function parseNotesFile(json: string, docPath: string): NotesFile {
   return {
     version: NOTES_FILE_VERSION,
     source: { file: typeof data.source?.file === "string" ? data.source.file : baseName(docPath) },
-    notes,
+    notes: dedupeIds(notes, invalid),
     invalid,
   };
 }
@@ -159,13 +159,78 @@ function orderAnchor(a: Anchor) {
   };
 }
 
-export function nextNoteId(notes: Note[], invalid: unknown[] = []): string {
-  let max = 0;
-  // 読めなかったノートの ID とも重ならないようにする
-  const ids = [...notes.map((n) => n.id), ...invalid.map((n) => (isObj(n) && isStr(n.id) ? n.id : ""))];
-  for (const id of ids) {
-    const m = /^note-(\d+)$/.exec(id);
-    if (m) max = Math.max(max, Number(m[1]));
+/**
+ * 孤立したノートファイル（source）を、付け替え先の資料のノートファイル（target。無ければ null）に統合する。
+ * ID が重なるノートには新しい ID を振る。読めなかったノートもそのまま引き継ぐ。
+ */
+export function mergeNotesFiles(target: NotesFile | null, source: NotesFile, targetDocPath: string): NotesFile {
+  const base = target ?? emptyNotesFile(targetDocPath);
+  const invalid = [...base.invalid, ...source.invalid];
+  const notes = [...base.notes];
+  for (const n of source.notes) {
+    const taken = notes.some((m) => m.id === n.id) || invalid.some((m) => isObj(m) && m.id === n.id);
+    notes.push(taken ? { ...n, id: nextNoteId(notes, invalid, Date.parse(n.createdAt) || Date.now()) } : n);
   }
-  return `note-${String(max + 1).padStart(3, "0")}`;
+  return { version: NOTES_FILE_VERSION, source: { file: baseName(targetDocPath) }, notes, invalid };
+}
+
+// ---------- ノート ID ----------
+
+/** Crockford Base32（ULID と同じ文字。I・L・O・U を含まない）を小文字で */
+const B32 = "0123456789abcdefghjkmnpqrstvwxyz";
+const TIME_LEN = 10;
+const RANDOM_LEN = 8;
+
+function randomBase32(len: number): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(len));
+  return Array.from(bytes, (b) => B32[b & 31]).join("");
+}
+
+function timeBase32(ms: number): string {
+  let t = Math.max(0, Math.floor(ms));
+  let s = "";
+  for (let i = 0; i < TIME_LEN; i++) {
+    s = B32[t % 32] + s;
+    t = Math.floor(t / 32);
+  }
+  return s;
+}
+
+/**
+ * 新しいノート ID（ULID 風: `note-` + 作成時刻 10 文字 + ランダム 8 文字）。
+ * 連番と違い、Git の別ブランチで同時にノートを追加しても衝突しない。文字列順で作成順に並ぶ。
+ * 旧形式の `note-001` もそのまま有効。
+ */
+export function nextNoteId(
+  notes: Note[],
+  invalid: unknown[] = [],
+  now: number = Date.now(),
+  random: (len: number) => string = randomBase32,
+): string {
+  // 読めなかったノートの ID とも重ならないようにする
+  const used = new Set([...notes.map((n) => n.id), ...invalid.map((n) => (isObj(n) && isStr(n.id) ? n.id : ""))]);
+  for (;;) {
+    const id = `note-${timeBase32(now)}${random(RANDOM_LEN)}`;
+    if (!used.has(id)) return id;
+  }
+}
+
+/**
+ * Git の merge などで同じ ID のノートが複数あると、表示・選択が混ざる。
+ * 2 件目以降に新しい ID を振り直す（ファイルには次に保存したときに反映される）。
+ */
+function dedupeIds(notes: Note[], invalid: unknown[]): Note[] {
+  const seen = new Set<string>();
+  const out: Note[] = [];
+  for (const n of notes) {
+    if (seen.has(n.id)) {
+      const id = nextNoteId(out, invalid, Date.parse(n.createdAt) || Date.now());
+      out.push({ ...n, id });
+      seen.add(id);
+    } else {
+      out.push(n);
+      seen.add(n.id);
+    }
+  }
+  return out;
 }

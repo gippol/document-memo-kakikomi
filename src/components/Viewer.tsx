@@ -5,16 +5,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { trimRange, type AnchorLocation } from "../lib/anchor";
 import type { TextDoc } from "../lib/document";
-import {
-  containerText,
-  linesOfRange,
-  locateInHtml,
-  offsetFromPoint,
-  offsetOf,
-  rangeFromOffsets,
-  slideSpans,
-  type SlideSpan,
-} from "../lib/dom";
+import { linesOfRange, locateInHtml, slideSpans, TextIndex, type SlideSpan } from "../lib/dom";
 
 export interface HighlightSpec {
   id: string;
@@ -123,20 +114,21 @@ export function Viewer(props: Props) {
   const [textVersion, setTextVersion] = useState(0);
   const [slides, setSlides] = useState<SlideSpan[]>([]);
   const [currentSlide, setCurrentSlide] = useState(1);
+  /** 描画した本文のテキスト索引（本文が変わるたびに作り直す） */
+  const indexRef = useRef<TextIndex | null>(null);
   const cbRef = useRef(props);
   cbRef.current = props;
 
   useImperativeHandle(ref, () => ({
     locate(start, end) {
       const body = bodyRef.current;
-      const r = body && rangeFromOffsets(body, start, end);
+      const r = indexRef.current?.rangeAt(start, end);
       if (!body || !r) return {};
       return doc.kind === "markdown" ? linesOfRange(r) : locateInHtml(body, r);
     },
     scrollToRange(start, end) {
-      const body = bodyRef.current;
       const sc = scrollRef.current;
-      const r = body && rangeFromOffsets(body, start, end);
+      const r = indexRef.current?.rangeAt(start, end);
       if (!r || !sc) return;
       const rect = r.getBoundingClientRect();
       const scRect = sc.getBoundingClientRect();
@@ -147,27 +139,29 @@ export function Viewer(props: Props) {
   // 描画後のテキストをアンカー基準として親へ渡す
   useLayoutEffect(() => {
     if (!bodyRef.current) return;
-    const spans = slideSpans(bodyRef.current);
+    const index = new TextIndex(bodyRef.current);
+    indexRef.current = index;
+    const spans = slideSpans(bodyRef.current, index);
     setSlides(spans);
-    cbRef.current.onTextReady(containerText(bodyRef.current), spans);
+    cbRef.current.onTextReady(index.text, spans);
     setTextVersion((v) => v + 1);
     setFloatPos(null);
   }, [docKey]);
 
   // ハイライト描画
   useEffect(() => {
-    const body = bodyRef.current;
-    if (!body) return;
+    const index = indexRef.current;
+    if (!index) return;
     const normal: Range[] = [];
     const stale: Range[] = [];
     const active: Range[] = [];
     for (const h of highlights) {
-      const r = rangeFromOffsets(body, h.start, h.end);
+      const r = index.rangeAt(h.start, h.end);
       if (!r) continue;
       if (h.id === activeId) active.push(r);
       else (h.stale ? stale : normal).push(r);
     }
-    const pend = pending ? rangeFromOffsets(body, pending.start, pending.end) : null;
+    const pend = pending ? index.rangeAt(pending.start, pending.end) : null;
     setHighlight("note", normal, 1);
     setHighlight("note-stale", stale, 2);
     setHighlight("note-active", active, 3);
@@ -185,9 +179,10 @@ export function Viewer(props: Props) {
   useEffect(() => {
     const onChange = () => {
       const body = bodyRef.current;
+      const index = indexRef.current;
       const sc = scrollRef.current;
       const sel = window.getSelection();
-      if (!body || !sc || !sel || sel.isCollapsed || sel.rangeCount === 0) {
+      if (!body || !index || !sc || !sel || sel.isCollapsed || sel.rangeCount === 0) {
         setFloatPos(null);
         cbRef.current.onSelectionChange(null);
         return;
@@ -198,11 +193,12 @@ export function Viewer(props: Props) {
         cbRef.current.onSelectionChange(null);
         return;
       }
-      const text = containerText(body);
+      // 全文は描画時に作った索引のものを使う（選択が変わるたびに全文を作り直さない）
+      const text = index.text;
       const [start, end] = trimRange(
         text,
-        offsetOf(body, range.startContainer, range.startOffset),
-        offsetOf(body, range.endContainer, range.endOffset),
+        index.offsetOf(range.startContainer, range.startOffset),
+        index.offsetOf(range.endContainer, range.endOffset),
       );
       if (start >= end) {
         setFloatPos(null);
@@ -254,6 +250,9 @@ export function Viewer(props: Props) {
 
   const view = (
     <div ref={scrollRef} className="relative h-full min-w-0 flex-1 overflow-auto bg-paper" onScroll={onScroll}>
+      {doc.kind === "markdown" && doc.encoding !== "UTF-8" && (
+        <p className="mx-auto max-w-[820px] px-12 pt-3 text-xs text-ink-dim">文字コード: {doc.encoding} として表示しています</p>
+      )}
       {doc.kind === "pptx" && doc.warnings.length > 0 && (
         <details className="mx-auto max-w-[820px] px-12 pt-3 text-xs text-ink-dim">
           <summary className="cursor-pointer">PowerPoint 変換情報 ・ 再現できなかった要素 {doc.warnings.length}件</summary>
@@ -309,8 +308,7 @@ export function Viewer(props: Props) {
           }
           const sel = window.getSelection();
           if (sel && !sel.isCollapsed) return;
-          if (!bodyRef.current) return;
-          const off = offsetFromPoint(bodyRef.current, e.clientX, e.clientY);
+          const off = indexRef.current?.offsetFromPoint(e.clientX, e.clientY) ?? null;
           if (off !== null) props.onClickOffset(off);
         }}
       >
