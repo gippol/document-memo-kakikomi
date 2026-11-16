@@ -84,7 +84,7 @@ Excel のノートはセル範囲に付けます（`anchor.type` が `"cell"`）
 
 1. **自動判定**: 段落スタイルの「アウトラインレベル」（基準スタイルから引き継いだものを含む）を読み、見出しにします。
    Word のナビゲーションウィンドウに見出しとして出るスタイルなら自動で認識されます。
-2. **設定ファイル**: アウトラインレベルを持たない独自スタイルは、資料フォルダ直下の `.shiryo-memo.json` で指定します。
+2. **設定ファイル**: アウトラインレベルを持たない独自スタイルは、資料フォルダ直下の `.document-memo-kakikomi.json` で指定します。
    変更は保存すると即座に反映されます。
 
 ```json
@@ -150,7 +150,7 @@ Excel の再アンカーは「記録位置に同じ値と見出し → 同じ値
 - `src/lib/document.ts` / `docx.ts` — 形式ごとの読み込み（Word は 見出しスタイル判定 → mammoth → DOMPurify → 段落番号付与）
 - `src/lib/pptx.ts` — PowerPoint の読み込み（JSZip でスライドの XML を読み、スライドごとの HTML に）
 - `src/lib/sheet.ts` / `xlsx.ts` — Excel のシートデータとセル範囲アンカー（SheetJS に依存しない） / SheetJS による読み込み
-- `src/lib/config.ts` — フォルダ設定 `.shiryo-memo.json` の読み込み
+- `src/lib/config.ts` — フォルダ設定 `.document-memo-kakikomi.json` の読み込み
 - `src/components/Viewer.tsx` — Markdown 表示、選択検知、CSS Custom Highlight API によるハイライト（資料 DOM を変更しない）
 - `src/components/SheetViewer.tsx` — Excel 表示（表は一度だけ描画し、選択・ハイライトは上に重ねた枠で描く）
 - `src/components/NotesPanel.tsx` / `FileTree.tsx` — ノート一覧・ファイルツリー

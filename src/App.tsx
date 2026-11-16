@@ -31,14 +31,14 @@ interface PendingSave {
   json: string;
 }
 
-const LS_ROOT = "shiryo-memo:lastRoot";
-const lsDocKey = (root: string) => `shiryo-memo:lastDoc:${root}`;
+const LS_ROOT = "document-memo-kakikomi:lastRoot";
+const lsDocKey = (root: string) => `document-memo-kakikomi:lastDoc:${root}`;
 const SAVE_DELAY = 500;
 
 /** 資料とノートの配置: side = 左右, stack = 上下 */
 type Layout = "side" | "stack";
-const LS_LAYOUT = "shiryo-memo:layout";
-const lsPaneKey = (l: Layout) => `shiryo-memo:notesSize:${l}`;
+const LS_LAYOUT = "document-memo-kakikomi:layout";
+const lsPaneKey = (l: Layout) => `document-memo-kakikomi:notesSize:${l}`;
 /** ノート欄の既定サイズ（side: 幅, stack: 高さ, px） */
 const PANE_DEFAULT: Record<Layout, number> = { side: 380, stack: 280 };
 const PANE_MIN = 160;
@@ -286,7 +286,7 @@ export default function App() {
 
   // ---------- 資料の読み込み ----------
 
-  /** フォルダ直下の .shiryo-memo.json を読む。壊れていても既定値で続行する */
+  /** フォルダ直下の .document-memo-kakikomi.json を読む。壊れていても既定値で続行する */
   const loadConfig = useCallback(async (r: string) => {
     let next = DEFAULT_CONFIG;
     try {
@@ -643,7 +643,7 @@ export default function App() {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="w-[56ch]">
-          <pre className="text-bright">{"shiryo-memo v0.1.0\n------------------"}</pre>
+          <pre className="text-bright">{"document-memo-kakikomi v0.1.0\n------------------"}</pre>
           <p className="mt-2 text-dim">資料を変更せず、別ファイル (.notes.json) にメモを残します。</p>
           <p className="mt-4">
             <span className="text-dim">&gt; </span>

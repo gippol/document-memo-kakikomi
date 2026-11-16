@@ -288,7 +288,7 @@ export function Viewer(props: Props) {
             </ul>
           )}
           <p className="mt-1">
-            見出しが正しく表示されない場合は、資料フォルダの .shiryo-memo.json に {'{ "docxHeadings": { "スタイル名": 1 } }'} の形で指定できます（0 で見出しにしない）。
+            見出しが正しく表示されない場合は、資料フォルダの .document-memo-kakikomi.json に {'{ "docxHeadings": { "スタイル名": 1 } }'} の形で指定できます（0 で見出しにしない）。
           </p>
         </details>
       )}

@@ -12,7 +12,7 @@ use tauri::ipc::Response;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const NOTES_SUFFIX: &str = ".notes.json";
-const CONFIG_FILE: &str = ".shiryo-memo.json";
+const CONFIG_FILE: &str = ".document-memo-kakikomi.json";
 const SUPPORTED_EXT: &[&str] = &["md", "markdown", "docx", "pptx", "xlsx", "xlsm", "xls"];
 const SKIP_DIRS: &[&str] = &["node_modules", "target", "dist"];
 
@@ -346,7 +346,7 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("shiryo-memo-test-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("document-memo-kakikomi-test-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(d.join("sub")).unwrap();
         d
