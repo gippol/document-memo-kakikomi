@@ -1,5 +1,5 @@
 /** 資料フォルダごとの設定ファイル（フォルダ直下に置く。任意） */
-export const CONFIG_FILE = ".shiryo-memo.json";
+export const CONFIG_FILE = ".document-memo-kakikomi.json";
 
 export interface FolderConfig {
   /** Word の見出しスタイル指定: スタイル名 → 見出しレベル (1〜6)、0 は「見出しにしない」 */

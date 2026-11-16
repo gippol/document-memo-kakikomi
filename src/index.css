@@ -157,6 +157,9 @@ body {
   color: #1f5fa8;
   text-decoration: underline;
 }
+.doc a.remote-img::before {
+  content: "[" attr(data-label) "]";
+}
 .doc strong { font-weight: 700; }
 .doc em { font-style: italic; }
 .doc del { text-decoration: line-through; }

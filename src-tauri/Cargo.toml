@@ -1,5 +1,5 @@
 [package]
-name = "shiryo-memo"
+name = "document-memo-kakikomi"
 version = "0.1.0"
 description = "資料別メモ管理アプリ"
 authors = ["you"]

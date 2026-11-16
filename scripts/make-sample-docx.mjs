@@ -11,7 +11,7 @@ const num = (text) => new Paragraph({ text, numbering: { reference: "steps", lev
 const cell = (text, bold = false) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text, bold })] })] });
 
 const doc = new Document({
-  creator: "shiryo-memo sample",
+  creator: "document-memo-kakikomi sample",
   numbering: {
     config: [
       { reference: "bullets", levels: [{ level: 0, format: LevelFormat.BULLET, text: "•" }] },
