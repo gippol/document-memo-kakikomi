@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use tauri::ipc::Response;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 const NOTES_SUFFIX: &str = ".notes.json";
 const CONFIG_FILE: &str = ".shiryo-memo.json";
@@ -162,9 +162,14 @@ fn write_notes(root: String, rel: String, content: String) -> Result<(), String>
 }
 
 /// フォルダを監視し、変更されたファイルの相対パスを `fs-changed` イベントで通知する。
+/// あわせて、資料内の相対画像を表示できるよう asset プロトコルでこのフォルダだけを公開する
+/// （tauri.conf.json の scope は空。フォルダ外のファイルは表示できない）。
 #[tauri::command]
 fn watch_folder(app: AppHandle, state: State<WatchState>, root: String) -> Result<(), String> {
     let root_path = PathBuf::from(&root);
+    app.asset_protocol_scope()
+        .allow_directory(&root_path, true)
+        .map_err(|e| format!("フォルダを公開できません: {e}"))?;
     let watch_root = root_path.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         let Ok(event) = res else { return };

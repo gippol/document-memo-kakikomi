@@ -4,7 +4,7 @@
 
 ## 🔴 優先度：高（セキュリティ・データ消失）
 
-- [ ] **1. asset プロトコルの公開範囲を絞り、CSP を設定する**
+- [x] **1. asset プロトコルの公開範囲を絞り、CSP を設定する**
   - 現状: `tauri.conf.json` が `csp: null`、`assetProtocol.scope: ["**"]`。Markdown の `![](../../..)` でディスク上の任意の画像を表示でき、`https://` 画像も無条件に読み込む（開封トラッキングされうる）
   - 対応: スコープは空にし、フォルダを開いたときに Rust 側で `asset_protocol_scope().allow_directory(root)` する。CSP で `img-src` を `asset:` / `data:` 等に限定。外部画像は表示せず、クリックでブラウザを開くリンクにする
 - [ ] **2. バックエンドで資料フォルダ（root）を検証する**

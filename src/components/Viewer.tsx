@@ -87,7 +87,12 @@ const Markdown = memo(function Markdown({ content, docAbsPath }: { content: stri
     ),
     img: ({ src, alt, node: _node, ...rest }) => {
       const s = typeof src === "string" ? src : "";
-      const url = !s || /^(https?:|data:)/.test(s) ? s : convertFileSrc(resolveRelative(docAbsPath, s));
+      // 外部の画像は読み込まない（資料を開いたことが外部に伝わるのを防ぐ）。クリックでブラウザで開く。
+      // 目印の文字は CSS で表示し、アンカーの基準テキストには含めない
+      if (/^https?:/i.test(s)) {
+        return <a href={s} title={s} className="remote-img" data-label={`外部画像: ${alt || s}`} />;
+      }
+      const url = !s || /^data:/i.test(s) ? s : convertFileSrc(resolveRelative(docAbsPath, s));
       return <img {...rest} src={url} alt={alt} />;
     },
   };
