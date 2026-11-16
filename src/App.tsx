@@ -6,7 +6,7 @@ import { SheetViewer, type CellHighlight, type CellSelection, type SheetViewerHa
 import { Viewer, type HighlightSpec, type TextSelection, type ViewerHandle } from "./components/Viewer";
 import { createAnchor, resolveAnchor } from "./lib/anchor";
 import type { SlideSpan } from "./lib/dom";
-import { api, type DocEntry } from "./lib/api";
+import { api, NOTES_CONFLICT, type DocEntry } from "./lib/api";
 import { CONFIG_FILE, DEFAULT_CONFIG, parseConfig, type FolderConfig } from "./lib/config";
 import { loadDocument, type LoadedDoc } from "./lib/document";
 import { createCellAnchor, formatRef, headerLabel, headersAt, resolveCellAnchor } from "./lib/sheet";
@@ -58,6 +58,12 @@ function lsSet(key: string, v: string) {
   }
 }
 
+/** 退避ファイル名に付ける日時（例: 20261117-041300） */
+function backupTag(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
 function errMsg(e: unknown) {
   return typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
 }
@@ -76,6 +82,8 @@ export default function App() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
+  /** ノートファイルの保存が外部の変更と競合したときの通知（閉じるまで表示） */
+  const [conflictNotice, setConflictNotice] = useState<string | null>(null);
   const [selection, setSelection] = useState<DocSelection | null>(null);
   const [draft, setDraft] = useState<DocSelection | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -127,31 +135,109 @@ export default function App() {
   const pathRef = useRef<string | null>(null);
   const notesRef = useRef<NotesFile | null>(null);
   const configRef = useRef<FolderConfig>(DEFAULT_CONFIG);
-  const lastWritten = useRef(new Map<string, string>());
+  /** 資料ごとに、ディスク上にあるはずのノートファイルの内容（最後に読んだ／書いたもの。null はファイルが無い） */
+  const lastWritten = useRef(new Map<string, string | null>());
   const pendingSave = useRef<PendingSave | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ---------- 保存 ----------
+  // ---------- ノートの読み込み ----------
 
-  const writeNow = useCallback(async (p: PendingSave) => {
-    if (pendingSave.current === p) pendingSave.current = null;
-    if (pathRef.current === p.path) setSaveState("saving");
-    lastWritten.current.set(p.path, p.json);
+  const loadNotes = useCallback(async (r: string, path: string) => {
+    const json = await api.readNotes(r, path);
+    lastWritten.current.set(path, json);
+    if (json === null) {
+      notesRef.current = null;
+      setNotesFile(null);
+      setNotesError(null);
+      setSaveState("none");
+      return;
+    }
     try {
-      await api.writeNotes(p.root, p.path, p.json);
-      if (pathRef.current === p.path) {
-        setSaveState(pendingSave.current ? "pending" : "saved");
-        setSaveError(null);
-      }
-      setDocs((ds) => ds.map((d) => (d.path === p.path && !d.hasNotes ? { ...d, hasNotes: true } : d)));
+      const parsed = parseNotesFile(json, path);
+      notesRef.current = parsed;
+      setNotesFile(parsed);
+      setNotesError(null);
+      setSaveState("saved");
     } catch (e) {
-      lastWritten.current.delete(p.path);
-      if (pathRef.current === p.path) {
-        setSaveState("error");
-        setSaveError(errMsg(e));
-      }
+      // 壊れたファイルを上書きしないよう、編集をロックする
+      notesRef.current = null;
+      setNotesFile(null);
+      setNotesError(`${path}${NOTES_SUFFIX} を読み込めません: ${errMsg(e)}（上書き防止のため編集をロックしています）`);
+      setSaveState("error");
     }
   }, []);
+
+  // ---------- 保存 ----------
+
+  /**
+   * 保存しようとしたら外部（git pull・同期フォルダなど）でノートファイルが変更されていた。
+   * 外部の変更を上書きしないよう、こちらの編集は別ファイルに退避し、外部の内容を読み込み直す。
+   */
+  const resolveConflict = useCallback(
+    async (p: PendingSave) => {
+      // まだ書いていない、より新しい編集があればそれを退避する（読み込み直した内容を上書きさせない）
+      let json = p.json;
+      const later = pendingSave.current;
+      if (later && later.root === p.root && later.path === p.path) {
+        json = later.json;
+        pendingSave.current = null;
+        if (saveTimer.current) clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      const isCurrent = () => rootRef.current === p.root && pathRef.current === p.path;
+      let backup: string;
+      try {
+        backup = await api.writeNotesBackup(p.root, p.path, backupTag(new Date()), json);
+      } catch (e) {
+        // 退避できなかった編集は画面上に残す（読み込み直さない）
+        if (isCurrent()) {
+          setSaveState("error");
+          setSaveError(`ノートファイルが外部で変更されていたため保存を中止しましたが、編集の退避にも失敗しました: ${errMsg(e)}`);
+        }
+        return;
+      }
+      setConflictNotice(
+        `${p.path}${NOTES_SUFFIX} が外部で変更されていたため上書きしませんでした。こちらの編集は ${backup} に退避し、外部の内容を読み込み直しました`,
+      );
+      if (isCurrent()) {
+        setSaveError(null);
+        await loadNotes(p.root, p.path).catch((e) => {
+          setSaveState("error");
+          setSaveError(`ノートファイルを読み込み直せません: ${errMsg(e)}`);
+        });
+      }
+    },
+    [loadNotes],
+  );
+
+  const writeNow = useCallback(
+    async (p: PendingSave) => {
+      if (pendingSave.current === p) pendingSave.current = null;
+      if (pathRef.current === p.path) setSaveState("saving");
+      const expected = lastWritten.current.get(p.path) ?? null;
+      // 自分の書き込みによる変更通知を無視できるよう、先に記録しておく
+      lastWritten.current.set(p.path, p.json);
+      try {
+        await api.writeNotes(p.root, p.path, p.json, expected);
+        if (pathRef.current === p.path) {
+          setSaveState(pendingSave.current ? "pending" : "saved");
+          setSaveError(null);
+        }
+        setDocs((ds) => ds.map((d) => (d.path === p.path && !d.hasNotes ? { ...d, hasNotes: true } : d)));
+      } catch (e) {
+        lastWritten.current.set(p.path, expected);
+        if (e === NOTES_CONFLICT) {
+          await resolveConflict(p);
+          return;
+        }
+        if (pathRef.current === p.path) {
+          setSaveState("error");
+          setSaveError(errMsg(e));
+        }
+      }
+    },
+    [resolveConflict],
+  );
 
   const flushSave = useCallback(async () => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -198,32 +284,7 @@ export default function App() {
     };
   }, [flushSave]);
 
-  // ---------- 読み込み ----------
-
-  const loadNotes = useCallback(async (r: string, path: string) => {
-    const json = await api.readNotes(r, path);
-    if (json === null) {
-      notesRef.current = null;
-      setNotesFile(null);
-      setNotesError(null);
-      setSaveState("none");
-      return;
-    }
-    lastWritten.current.set(path, json);
-    try {
-      const parsed = parseNotesFile(json, path);
-      notesRef.current = parsed;
-      setNotesFile(parsed);
-      setNotesError(null);
-      setSaveState("saved");
-    } catch (e) {
-      // 壊れたファイルを上書きしないよう、編集をロックする
-      notesRef.current = null;
-      setNotesFile(null);
-      setNotesError(`${path}${NOTES_SUFFIX} を読み込めません: ${errMsg(e)}（上書き防止のため編集をロックしています）`);
-      setSaveState("error");
-    }
-  }, []);
+  // ---------- 資料の読み込み ----------
 
   /** フォルダ直下の .shiryo-memo.json を読む。壊れていても既定値で続行する */
   const loadConfig = useCallback(async (r: string) => {
@@ -631,6 +692,14 @@ export default function App() {
             [!] {m}
           </div>
         ))}
+      {conflictNotice && (
+        <div className="flex items-start gap-2 border-b border-line px-3 py-1 text-bright">
+          <span className="min-w-0 flex-1">[!] {conflictNotice}</span>
+          <button onClick={() => setConflictNotice(null)} className="btn shrink-0">
+            閉じる
+          </button>
+        </div>
+      )}
       {staleSummary.total > 0 && (
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-1">
           <span>

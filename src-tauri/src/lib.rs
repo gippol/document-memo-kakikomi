@@ -202,16 +202,33 @@ fn read_config(state: State<FolderState>, root: String) -> Result<Option<String>
         .map_err(|e| format!("設定ファイルを読めません: {e}"))
 }
 
+/// 保存しようとしたノートファイルが、最後に読んだ／書いた内容から外部で変更されていたときのエラー。
+const NOTES_CONFLICT: &str = "NOTES_CONFLICT";
+
+/// ディスク上の内容が expected（None は「ファイルが無い」）と同じか
+fn matches_on_disk(path: &Path, expected: Option<&str>) -> Result<bool, String> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(expected.is_some_and(|e| e.as_bytes() == bytes.as_slice())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(expected.is_none()),
+        Err(e) => Err(format!("ノートファイルを確認できません: {e}")),
+    }
+}
+
 /// ノートファイルをアトミックに書き込む（一時ファイル → rename）。
+/// ディスク上の内容が expected と異なる（外部で変更された）ときは書き込まず `NOTES_CONFLICT` を返す。
 #[tauri::command]
 fn write_notes(
     state: State<FolderState>,
     root: String,
     rel: String,
     content: String,
+    expected: Option<String>,
 ) -> Result<(), String> {
     let (root_path, canon) = checked_root(&state, &root)?;
     let path = resolve_for_write(&root_path, &canon, &notes_rel(&rel))?;
+    if !matches_on_disk(&path, expected.as_deref())? {
+        return Err(NOTES_CONFLICT.to_string());
+    }
     let mut tmp = path.clone().into_os_string();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
@@ -224,6 +241,38 @@ fn write_notes(
         let _ = fs::remove_file(&tmp);
         format!("保存に失敗しました: {e}")
     })
+}
+
+/// 競合した編集を `<資料名>.notes.conflict-<tag>.json` に退避する（既存ファイルは上書きしない）。
+/// 作成したファイルのルートからの相対パスを返す。
+#[tauri::command]
+fn write_notes_backup(
+    state: State<FolderState>,
+    root: String,
+    rel: String,
+    tag: String,
+    content: String,
+) -> Result<String, String> {
+    if tag.is_empty() || tag.len() > 32 || !tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err(format!("不正な退避名です: {tag}"));
+    }
+    let (root_path, canon) = checked_root(&state, &root)?;
+    for i in 1..=99 {
+        let suffix = if i == 1 { String::new() } else { format!("-{i}") };
+        let backup_rel = format!("{rel}.notes.conflict-{tag}{suffix}.json");
+        let path = resolve_for_write(&root_path, &canon, &backup_rel)?;
+        match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut f) => {
+                use std::io::Write;
+                f.write_all(content.as_bytes())
+                    .map_err(|e| format!("退避に失敗しました: {e}"))?;
+                return Ok(backup_rel);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("退避に失敗しました: {e}")),
+        }
+    }
+    Err("退避ファイルを作成できません（同名のファイルが多すぎます）".to_string())
 }
 
 /// 資料フォルダを開く。以降のコマンドはこのフォルダに対してのみ動く。
@@ -285,6 +334,7 @@ pub fn run() {
             read_notes,
             read_config,
             write_notes,
+            write_notes_backup,
             open_folder
         ])
         .run(tauri::generate_context!())
@@ -334,5 +384,20 @@ mod tests {
 
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&other);
+    }
+
+    #[test]
+    fn matches_on_disk_detects_external_change() {
+        let root = temp_dir("conflict");
+        let p = root.join("a.md.notes.json");
+        // ファイルが無い
+        assert!(matches_on_disk(&p, None).unwrap());
+        assert!(!matches_on_disk(&p, Some("x")).unwrap());
+        // ファイルがある
+        fs::write(&p, "x").unwrap();
+        assert!(matches_on_disk(&p, Some("x")).unwrap());
+        assert!(!matches_on_disk(&p, Some("y")).unwrap());
+        assert!(!matches_on_disk(&p, None).unwrap());
+        let _ = fs::remove_dir_all(&root);
     }
 }

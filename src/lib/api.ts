@@ -12,6 +12,9 @@ export interface DocContent {
   sha256: string;
 }
 
+/** write_notes が「外部で変更されていた」ときに返すエラー */
+export const NOTES_CONFLICT = "NOTES_CONFLICT";
+
 export const api = {
   pickFolder: async (): Promise<string | null> => {
     const r = await open({ directory: true, multiple: false, title: "資料フォルダを開く" });
@@ -22,8 +25,15 @@ export const api = {
   readDocumentBytes: (root: string, rel: string) => invoke<ArrayBuffer>("read_document_bytes", { root, rel }),
   readConfig: (root: string) => invoke<string | null>("read_config", { root }),
   readNotes: (root: string, rel: string) => invoke<string | null>("read_notes", { root, rel }),
-  writeNotes: (root: string, rel: string, content: string) =>
-    invoke<void>("write_notes", { root, rel, content }),
+  /**
+   * ノートファイルを書き込む。expected は最後に読んだ／書いた内容（null はファイルが無い想定）。
+   * ディスク上の内容が異なれば書き込まず NOTES_CONFLICT で失敗する
+   */
+  writeNotes: (root: string, rel: string, content: string, expected: string | null) =>
+    invoke<void>("write_notes", { root, rel, content, expected }),
+  /** 競合した編集を退避し、作成したファイルの相対パスを返す */
+  writeNotesBackup: (root: string, rel: string, tag: string, content: string) =>
+    invoke<string>("write_notes_backup", { root, rel, tag, content }),
   /** 資料フォルダを登録して監視を始める。ほかのコマンドはこのフォルダに対してのみ動く */
   openFolder: (root: string) => invoke<void>("open_folder", { root }),
   onFsChanged: (cb: (paths: string[]) => void): Promise<UnlistenFn> =>
