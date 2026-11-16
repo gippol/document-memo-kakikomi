@@ -14,6 +14,11 @@ export interface DocContent {
   encoding: string;
 }
 
+/** invoke などのエラーを表示用の文字列にする（Tauri のコマンドは文字列でエラーを返す） */
+export function errMsg(e: unknown): string {
+  return typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
+}
+
 /** write_notes が「外部で変更されていた」ときに返すエラー */
 export const NOTES_CONFLICT = "NOTES_CONFLICT";
 
