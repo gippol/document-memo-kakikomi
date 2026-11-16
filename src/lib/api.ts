@@ -10,6 +10,8 @@ export interface DocEntry {
 export interface DocContent {
   content: string;
   sha256: string;
+  /** 判定した文字コード（"UTF-8" / "Shift_JIS" / "EUC-JP" など） */
+  encoding: string;
 }
 
 /** write_notes が「外部で変更されていた」ときに返すエラー */

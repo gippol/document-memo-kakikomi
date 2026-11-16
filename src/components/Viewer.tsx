@@ -254,6 +254,9 @@ export function Viewer(props: Props) {
 
   const view = (
     <div ref={scrollRef} className="relative h-full min-w-0 flex-1 overflow-auto bg-paper" onScroll={onScroll}>
+      {doc.kind === "markdown" && doc.encoding !== "UTF-8" && (
+        <p className="mx-auto max-w-[820px] px-12 pt-3 text-xs text-ink-dim">文字コード: {doc.encoding} として表示しています</p>
+      )}
       {doc.kind === "pptx" && doc.warnings.length > 0 && (
         <details className="mx-auto max-w-[820px] px-12 pt-3 text-xs text-ink-dim">
           <summary className="cursor-pointer">PowerPoint 変換情報 ・ 再現できなかった要素 {doc.warnings.length}件</summary>

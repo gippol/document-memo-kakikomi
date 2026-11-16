@@ -52,6 +52,45 @@ struct DocEntry {
 struct DocContent {
     content: String,
     sha256: String,
+    /// 判定した文字コード（"UTF-8" / "Shift_JIS" / "EUC-JP" など。WHATWG の名前）
+    encoding: String,
+}
+
+/// テキスト資料のバイト列を文字コードを判定して文字列にする。
+/// 1. BOM があればそれに従う（UTF-8 / UTF-16LE / UTF-16BE）
+/// 2. UTF-8 として正しければ UTF-8
+/// 3. それ以外は内容から推定（Shift_JIS・EUC-JP など）。ほぼ UTF-8 で一部だけ壊れている場合は UTF-8 のまま読む
+fn decode_text(bytes: &[u8]) -> (String, &'static str) {
+    use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
+    use encoding_rs::Encoding;
+
+    if let Some((enc, bom_len)) = Encoding::for_bom(bytes) {
+        let (s, _) = enc.decode_without_bom_handling(&bytes[bom_len..]);
+        return (s.into_owned(), enc.name());
+    }
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return (s.to_owned(), encoding_rs::UTF_8.name());
+    }
+    // 一部だけ壊れた UTF-8（途中で切れた・1 バイト混入など）。
+    // Shift_JIS などの文字列を UTF-8 として読むとほぼすべて不正になるので、正しく読めた非 ASCII 文字が十分多ければ UTF-8 とみなす
+    let lossy = String::from_utf8_lossy(bytes);
+    let (mut good, mut bad) = (0usize, 0usize);
+    for c in lossy.chars() {
+        match c {
+            '\u{FFFD}' => bad += 1,
+            c if !c.is_ascii() => good += 1,
+            _ => {}
+        }
+    }
+    if good >= bad * 4 {
+        return (lossy.into_owned(), encoding_rs::UTF_8.name());
+    }
+    // ISO-2022-JP は 7 ビットなので UTF-8 として正しく、ここには来ない
+    let mut det = EncodingDetector::new(Iso2022JpDetection::Deny);
+    det.feed(bytes, true);
+    let enc = det.guess(None, Utf8Detection::Allow);
+    let (s, _) = enc.decode_without_bom_handling(bytes);
+    (s.into_owned(), enc.name())
 }
 
 /// 相対パスをルート配下に解決する。`..` や絶対パスは拒否。
@@ -158,12 +197,14 @@ fn read_document(state: State<FolderState>, root: String, rel: String) -> Result
     let (root_path, canon) = checked_root(&state, &root)?;
     let path = resolve_existing(&root_path, &canon, &rel)?.ok_or_else(|| format!("資料が見つかりません: {rel}"))?;
     let bytes = fs::read(&path).map_err(|e| format!("資料を読めません: {e}"))?;
+    // ハッシュは生のバイト列から（文字コードの判定結果が変わっても旧版扱いにならない）
     let sha256 = hex::encode(Sha256::digest(&bytes));
-    let mut content = String::from_utf8_lossy(&bytes).into_owned();
-    if content.starts_with('\u{feff}') {
-        content.remove(0);
-    }
-    Ok(DocContent { content, sha256 })
+    let (content, encoding) = decode_text(&bytes);
+    Ok(DocContent {
+        content,
+        sha256,
+        encoding: encoding.to_string(),
+    })
 }
 
 /// バイナリ資料（.docx など）をそのまま返す。解析はフロントエンド側で行う。
@@ -384,6 +425,36 @@ mod tests {
 
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&other);
+    }
+
+    const JA: &str = "# 仕様書\n\nこれは日本語で書かれた資料です。文字コードを自動で判定して、正しく表示できることを確認します。\n";
+
+    #[test]
+    fn decode_text_utf8_and_bom() {
+        assert_eq!(decode_text(JA.as_bytes()), (JA.to_string(), "UTF-8"));
+        let mut bom = vec![0xEF, 0xBB, 0xBF];
+        bom.extend_from_slice(JA.as_bytes());
+        assert_eq!(decode_text(&bom), (JA.to_string(), "UTF-8"));
+        let mut u16 = vec![0xFF, 0xFE];
+        u16.extend(JA.encode_utf16().flat_map(|c| c.to_le_bytes()));
+        assert_eq!(decode_text(&u16), (JA.to_string(), "UTF-16LE"));
+    }
+
+    #[test]
+    fn decode_text_detects_japanese_legacy_encodings() {
+        for enc in [encoding_rs::SHIFT_JIS, encoding_rs::EUC_JP] {
+            let (bytes, _, _) = enc.encode(JA);
+            assert_eq!(decode_text(&bytes), (JA.to_string(), enc.name()));
+        }
+    }
+
+    #[test]
+    fn decode_text_mostly_utf8_stays_utf8() {
+        let mut bytes = JA.as_bytes().to_vec();
+        bytes.push(0xFF);
+        let (s, enc) = decode_text(&bytes);
+        assert_eq!(enc, "UTF-8");
+        assert!(s.starts_with(JA));
     }
 
     #[test]
