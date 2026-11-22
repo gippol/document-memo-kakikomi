@@ -101,6 +101,25 @@ describe("buildMinutes", () => {
     expect(md).toContain("### （資料に見つからないノート）\n\n- 消えた\n");
   });
 
+  it("全体メモは資料全体を先頭に、見出しの節のものはその見出しの先頭にまとめる", () => {
+    const placeAnchor = (scope: "doc" | "heading", heading?: string) =>
+      ({ type: "place", scope, heading, quote: heading ?? "", sourceSha256: "x" }) as const;
+    const md = buildMinutes(
+      [
+        view({ comment: "背景の補足" }, { heading: "1. 背景", paragraph: 2, sortKey: 20 }),
+        view({ comment: "脱線: 来期の話", anchor: placeAnchor("doc") }, { place: { scope: "doc" }, sortKey: -1 }),
+        view(
+          { comment: "背景は口頭で補足あり", anchor: placeAnchor("heading", "1. 背景") },
+          { place: { scope: "heading", heading: "1. 背景" }, heading: "1. 背景", sortKey: 10 },
+        ),
+        view({ kind: "decision", comment: "次回は対面", anchor: placeAnchor("doc") }, { place: { scope: "doc" }, sortKey: -1 }),
+      ],
+      { ...opts, includeQuotes: true },
+    );
+    expect(md).toContain("## 決定事項\n\n- 次回は対面（資料全体）\n");
+    expect(md).toContain("### （資料全体）\n\n- 脱線: 来期の話\n\n### 1. 背景\n\n- 背景は口頭で補足あり\n- 背景の補足（¶2）\n");
+  });
+
   it("ノートが無ければその旨を書く", () => {
     expect(buildMinutes([], opts)).toContain("（ノートなし）");
   });

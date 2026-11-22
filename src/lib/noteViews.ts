@@ -3,6 +3,7 @@ import type { LoadedDoc } from "./document";
 import type { SlideSpan } from "./dom";
 import { isOpen, type NoteKind } from "./noteMeta";
 import type { Note, NotesFile } from "./notesFile";
+import { resolvePlace, type HeadingSpan } from "./place";
 import { formatRef, headerLabel, headersAt, resolveCellAnchor } from "./sheet";
 import type { NoteFilter, NoteTarget, NoteView, SortMode } from "../components/NotesPanel";
 import type { HighlightSpec } from "../components/Viewer";
@@ -20,10 +21,19 @@ export function buildNoteViews(
   doc: LoadedDoc | null,
   docText: string | null,
   slides: SlideSpan[],
+  headings: HeadingSpan[],
   locate: Locate,
 ): NoteView[] {
   if (!notesFile || !doc) return [];
+  const sheets = doc.kind === "xlsx" ? doc.book.sheets.map((s) => s.name) : [];
   return notesFile.notes.map((note): NoteView => {
+    if (note.anchor.type === "place") {
+      // 全体メモは文言に付けていないので、資料が更新されても古くならない
+      const r = resolvePlace(note.anchor, { slides, headings, sheets });
+      const base = { note, stale: false, target: r.target, sortKey: r.sortKey, place: r.place };
+      if (!r.found) return { ...base, status: "orphaned" };
+      return { ...base, status: "ok", slide: r.place.slide, slideId: r.place.slideId, heading: r.place.heading };
+    }
     const stale = note.anchor.sourceSha256 !== doc.sha256;
     const lost: NoteView = { note, status: "orphaned", stale, target: null, sortKey: Infinity };
     if (note.anchor.type === "cell") {
@@ -81,6 +91,11 @@ export function sortNoteViews(views: NoteView[], mode: SortMode): NoteView[] {
 /** Markdown は行番号、Word は段落番号、PowerPoint はスライド番号、Excel はセル範囲で位置を表す（見つからなければ null） */
 export function locationLabel(v: NoteView): string | null {
   if (v.status === "orphaned") return null;
+  if (v.place) {
+    if (v.place.scope === "doc") return "全体";
+    if (v.place.scope === "sheet") return v.place.sheet ?? null;
+    if (v.place.scope === "heading") return "§";
+  }
   if (v.cell) return v.cell;
   if (v.slide !== undefined) return `S${v.slide}`;
   if (v.lineStart !== undefined) {

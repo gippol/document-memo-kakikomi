@@ -5,7 +5,8 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { trimRange, type AnchorLocation } from "../lib/anchor";
 import type { TextDoc } from "../lib/document";
-import { linesOfRange, locateInHtml, slideSpans, TextIndex, type SlideSpan } from "../lib/dom";
+import { headingSpans, linesOfRange, locateInHtml, slideSpans, TextIndex, type SlideSpan } from "../lib/dom";
+import type { HeadingSpan, PlaceOption } from "../lib/place";
 
 export interface HighlightSpec {
   id: string;
@@ -24,6 +25,8 @@ export interface ViewerHandle {
   /** 範囲の位置情報（Markdown: 行 / Word: 段落・見出し） */
   locate(start: number, end: number): AnchorLocation;
   scrollToRange(start: number, end: number): void;
+  /** いま見ている場所（PowerPoint: 表示中のスライド / Word・Markdown: 画面上部にかかる見出しの節）。全体メモの付け先に使う */
+  currentPlace(): PlaceOption | null;
 }
 
 interface Props {
@@ -35,7 +38,7 @@ interface Props {
   activeId: string | null;
   pending: { start: number; end: number } | null;
   /** slides は PowerPoint のときだけ中身がある */
-  onTextReady(text: string, slides: SlideSpan[]): void;
+  onTextReady(text: string, slides: SlideSpan[], headings: HeadingSpan[]): void;
   onSelectionChange(sel: TextSelection | null): void;
   onAddNote(): void;
   onClickOffset(offset: number): void;
@@ -127,6 +130,23 @@ export function Viewer(props: Props) {
       // Markdown も議事録で議題ごとにまとめられるよう、直前の見出しを記録する
       return doc.kind === "markdown" ? { ...linesOfRange(r), heading: locateInHtml(body, r).heading } : locateInHtml(body, r);
     },
+    currentPlace() {
+      if (slides.length > 0) {
+        const s = slides.find((x) => x.no === currentSlide);
+        return s ? { scope: "slide", slide: s.no, slideId: s.id, heading: s.title || undefined } : null;
+      }
+      const body = bodyRef.current;
+      const sc = scrollRef.current;
+      if (!body || !sc) return null;
+      // 画面の上から 1/3 までに出ている最後の見出し（無ければ画面より上にある最後の見出し）
+      const line = sc.getBoundingClientRect().top + sc.clientHeight / 3;
+      let heading: string | undefined;
+      for (const h of body.querySelectorAll("h1,h2,h3,h4,h5,h6")) {
+        if (h.getBoundingClientRect().top > line) break;
+        heading = h.textContent?.trim().slice(0, 60) || heading;
+      }
+      return heading ? { scope: "heading", heading } : null;
+    },
     scrollToRange(start, end) {
       const sc = scrollRef.current;
       const r = indexRef.current?.rangeAt(start, end);
@@ -144,7 +164,7 @@ export function Viewer(props: Props) {
     indexRef.current = index;
     const spans = slideSpans(bodyRef.current, index);
     setSlides(spans);
-    cbRef.current.onTextReady(index.text, spans);
+    cbRef.current.onTextReady(index.text, spans, spans.length > 0 ? [] : headingSpans(bodyRef.current, index));
     setTextVersion((v) => v + 1);
     setFloatPos(null);
   }, [docKey]);

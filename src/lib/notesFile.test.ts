@@ -38,3 +38,29 @@ describe("ノートの種類・担当者・期限", () => {
     expect(f.invalid).toHaveLength(3);
   });
 });
+
+describe("全体メモ", () => {
+  const place = (anchor: object) => ({ ...base, anchor: { quote: "", sourceSha256: "x", ...anchor } });
+
+  it("読み書きで保たれ、キー順は固定", () => {
+    const note = place({ type: "place", scope: "slide", slide: 2, slideId: 300, heading: "体制", quote: "体制" });
+    const out = serializeNotesFile(parseNotesFile(json([note]), "a.pptx"));
+    expect(parseNotesFile(out, "a.pptx").notes[0].anchor).toEqual(note.anchor);
+    expect(Object.keys(JSON.parse(out).notes[0].anchor)).toEqual(["type", "scope", "slide", "slideId", "heading", "quote", "sourceSha256"]);
+  });
+
+  it("付け先に必要な項目が無ければ読めないノートとして残す", () => {
+    const f = parseNotesFile(
+      json([
+        place({ type: "place", scope: "doc" }),
+        place({ type: "place", scope: "slide" }),
+        place({ type: "place", scope: "sheet" }),
+        place({ type: "place", scope: "heading", heading: 1 }),
+        place({ type: "place", scope: "page" }),
+      ]),
+      "a.md",
+    );
+    expect(f.notes).toHaveLength(1);
+    expect(f.invalid).toHaveLength(4);
+  });
+});

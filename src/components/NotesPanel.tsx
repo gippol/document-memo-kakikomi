@@ -16,10 +16,11 @@ import {
 } from "../lib/noteMeta";
 import { locationLabel } from "../lib/noteViews";
 import type { Note } from "../lib/notesFile";
+import { placeLabel, type PlaceOption, type PlaceTarget } from "../lib/place";
 import type { CellRange } from "../lib/sheet";
 
-/** ノートが現在の資料で指している範囲 */
-export type NoteTarget = { kind: "text"; start: number; end: number } | { kind: "cell"; sheet: string; range: CellRange };
+/** ノートが現在の資料で指している範囲（全体メモはスライド・見出しの先頭、またはシート） */
+export type NoteTarget = { kind: "text"; start: number; end: number } | { kind: "cell"; sheet: string; range: CellRange } | PlaceTarget;
 
 export interface NoteView extends AnchorLocation {
   note: Note;
@@ -32,6 +33,8 @@ export interface NoteView extends AnchorLocation {
   cell?: string;
   /** 「位置」順に並べるときのキー */
   sortKey: number;
+  /** 全体メモの付け先（今の資料でのスライド番号・タイトル） */
+  place?: PlaceOption;
 }
 
 export type SortMode = "position" | "timeline";
@@ -44,7 +47,8 @@ interface Props {
   activeId: string | null;
   /** 値が変わるたびにアクティブカードへスクロール＆点滅 */
   focusTick: number;
-  draft: { quote: string } | null;
+  /** places があれば全体メモ（付け先の選択肢） */
+  draft: { quote: string; places?: PlaceOption[] } | null;
   hasSelection: boolean;
   sortMode: SortMode;
   onSortMode(m: SortMode): void;
@@ -54,7 +58,9 @@ interface Props {
   counts: Record<NoteFilter, number>;
   onExportMinutes(): void;
   onAddFromSelection(): void;
-  onDraftSave(fields: NoteFields): void;
+  onAddPlace(): void;
+  canAddPlace: boolean;
+  onDraftSave(fields: NoteFields, place?: PlaceOption): void;
   onDraftCancel(): void;
   onUpdate(id: string, fields: NoteFields): void;
   onToggleDone(id: string): void;
@@ -163,6 +169,34 @@ function NoteEditor(props: { initial: NoteFields; onSave(v: NoteFields): void; o
   );
 }
 
+/** 全体メモの付け先 */
+function PlaceLine({ place }: { place: PlaceOption }) {
+  return <div className="mt-1 text-dim">◇ {placeLabel(place)}</div>;
+}
+
+/** 全体メモの書き始め: 付け先を選んでから書く（既定はいま見ている場所） */
+function PlaceDraft(props: { places: PlaceOption[]; onSave(fields: NoteFields, place: PlaceOption): void; onCancel(): void }) {
+  const [idx, setIdx] = useState(props.places.length - 1);
+  return (
+    <>
+      <div className="mt-1 flex flex-wrap items-center gap-x-1">
+        <span className="text-dim">付け先:</span>
+        {props.places.map((p, i) => (
+          <button key={i} type="button" onClick={() => setIdx(i)} className={`btn ${i === idx ? "on" : ""}`}>
+            {placeLabel(p)}
+          </button>
+        ))}
+      </div>
+      <NoteEditor
+        initial={{ kind: "memo", comment: "" }}
+        saveLabel="追加"
+        onSave={(f) => props.onSave(f, props.places[idx])}
+        onCancel={props.onCancel}
+      />
+    </>
+  );
+}
+
 function Quote({ text }: { text: string }) {
   return <div className="mt-1 line-clamp-3 whitespace-pre-line border-l-2 border-accent/70 pl-[1ch] text-dim">{text}</div>;
 }
@@ -233,7 +267,7 @@ function NoteCard(props: {
           § {view.heading}
         </div>
       )}
-      <Quote text={note.anchor.quote} />
+      {view.place ? <PlaceLine place={view.place} /> : <Quote text={note.anchor.quote} />}
 
       {editing ? (
         <NoteEditor
@@ -285,7 +319,7 @@ function NoteCard(props: {
               <button onClick={() => setConfirmDelete(true)} className="btn">
                 削除
               </button>
-              <button onClick={props.onJump} disabled={view.status === "orphaned"} className="btn">
+              <button onClick={props.onJump} disabled={!view.target} className="btn">
                 ジャンプ
               </button>
               {(view.status !== "ok" || view.stale) && (
@@ -360,9 +394,15 @@ export function NotesPanel(props: Props) {
       <div className="flex-1 overflow-auto">
         {draft && (
           <div className="border-b border-line border-l-2 border-l-[#b9d7f2] bg-panel px-2 py-2">
-            <div className="text-[#b9d7f2]">+ new note</div>
-            <Quote text={draft.quote} />
-            <NoteEditor initial={{ kind: "memo", comment: "" }} saveLabel="追加" onSave={props.onDraftSave} onCancel={props.onDraftCancel} />
+            <div className="text-[#b9d7f2]">{draft.places ? "+ 全体メモ" : "+ new note"}</div>
+            {draft.places ? (
+              <PlaceDraft places={draft.places} onSave={props.onDraftSave} onCancel={props.onDraftCancel} />
+            ) : (
+              <>
+                <Quote text={draft.quote} />
+                <NoteEditor initial={{ kind: "memo", comment: "" }} saveLabel="追加" onSave={props.onDraftSave} onCancel={props.onDraftCancel} />
+              </>
+            )}
           </div>
         )}
         {counts.all === 0 && !draft && (
@@ -370,6 +410,8 @@ export function NotesPanel(props: Props) {
             -- ノートなし --
             <br />
             資料のテキスト（Excel はセル）を選択して Ctrl+M で追加
+            <br />
+            資料のどこにも付けないメモは Ctrl+Shift+M（全体メモ）
           </p>
         )}
         {counts.all > 0 && items.length === 0 && !draft && <p className="px-2 py-4 text-dim">-- 該当するノートなし --</p>}
@@ -393,14 +435,22 @@ export function NotesPanel(props: Props) {
         ))}
       </div>
 
-      <div className="border-t border-line px-2 py-1">
+      <div className="flex gap-1 border-t border-line px-2 py-1">
         <button
           onMouseDown={(e) => e.preventDefault()}
           onClick={props.onAddFromSelection}
           disabled={!props.hasSelection}
-          className="btn w-full"
+          className="btn flex-1"
         >
-          + 選択範囲にノートを追加
+          + 選択範囲にノート
+        </button>
+        <button
+          onClick={props.onAddPlace}
+          disabled={!props.canAddPlace}
+          className="btn flex-1"
+          title="資料の文言を選ばずに、資料全体・いま見ているスライド・シート・見出しの節にメモを付けます (Ctrl+Shift+M)"
+        >
+          + 全体メモ
         </button>
       </div>
     </div>

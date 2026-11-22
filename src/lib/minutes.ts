@@ -13,6 +13,7 @@ export interface MinutesOptions {
 
 const QUOTE_MAX = 120;
 const NO_HEADING = "（見出しなし）";
+const WHOLE_DOC = "（資料全体）";
 const LOST = "（資料に見つからないノート）";
 
 /** 引用を 1 行・最大 QUOTE_MAX 文字にする */
@@ -30,14 +31,17 @@ function indentRest(text: string, indent: string): string {
     .join("\n");
 }
 
-/** コメントが空ならノートを付けた文言を本文にする */
+/** コメントが空ならノートを付けた文言を本文にする（全体メモは文言が無い） */
 function body(v: NoteView): string {
-  return v.note.comment.trim() ? v.note.comment : `「${oneLine(v.note.anchor.quote)}」`;
+  if (v.note.comment.trim()) return v.note.comment;
+  return v.place ? "（コメントなし）" : `「${oneLine(v.note.anchor.quote)}」`;
 }
 
 /** 議題ごとにまとめるときの見出し（Excel はシート、PowerPoint はスライド） */
 function groupOf(v: NoteView): string {
   if (v.status === "orphaned") return LOST;
+  if (v.place?.scope === "doc") return WHOLE_DOC;
+  if (v.place?.scope === "sheet") return v.place.sheet ?? NO_HEADING;
   if (v.cell) return v.cell.slice(0, v.cell.lastIndexOf("!"));
   if (v.slide !== undefined) return `S${v.slide} ${v.heading ?? ""}`.trim();
   return v.heading || NO_HEADING;
@@ -46,6 +50,8 @@ function groupOf(v: NoteView): string {
 /** 決定・宿題・質問の行末に付ける出典（見出しと位置） */
 function sourceOf(v: NoteView): string {
   if (v.status === "orphaned") return "位置不明";
+  if (v.place?.scope === "doc") return "資料全体";
+  if (v.place?.scope === "heading") return `§ ${v.place.heading}`;
   const loc = locationLabel(v);
   // Excel の見出しは行・列の見出しなので、セル範囲と並べる
   const heading = v.slide !== undefined ? undefined : v.heading;
@@ -61,7 +67,7 @@ function taskLine(v: NoteView, kind: NoteKind, today: Date): string {
 }
 
 function quoteLine(v: NoteView, indent: string, opts: MinutesOptions): string[] {
-  if (!opts.includeQuotes || !v.note.comment.trim()) return [];
+  if (!opts.includeQuotes || !v.note.comment.trim() || v.place) return [];
   return [`${indent}> ${oneLine(v.note.anchor.quote)}`];
 }
 
@@ -108,7 +114,8 @@ export function buildMinutes(views: NoteView[], opts: MinutesOptions): string {
     for (const [g, items] of groups) {
       out.push("", `### ${g}`, "");
       for (const v of items) {
-        const loc = locationLabel(v);
+        // 全体メモは見出しそのものに付いているので、位置を繰り返さない
+        const loc = v.place ? null : locationLabel(v);
         out.push(`- ${indentRest(body(v), "  ")}${loc ? `（${loc}）` : ""}`);
         out.push(...quoteLine(v, "  ", opts));
       }

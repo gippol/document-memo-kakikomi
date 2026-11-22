@@ -1,9 +1,10 @@
 import type { TextAnchor } from "./anchor";
 import { isDueDate, isNoteKind, type NoteKind } from "./noteMeta";
+import { PLACE_SCOPES, type PlaceAnchor } from "./place";
 import { parseRef, type CellAnchor } from "./sheet";
 
-/** Markdown・Word・PowerPoint はテキスト範囲、Excel はセル範囲にノートを付ける */
-export type Anchor = TextAnchor | CellAnchor;
+/** Markdown・Word・PowerPoint はテキスト範囲、Excel はセル範囲にノートを付ける。全体メモは資料全体・スライド・シート・見出しの節 */
+export type Anchor = TextAnchor | CellAnchor | PlaceAnchor;
 
 export const NOTES_FILE_VERSION = 1;
 export const NOTES_SUFFIX = ".notes.json";
@@ -107,6 +108,15 @@ function isCellAnchor(a: Obj): boolean {
   );
 }
 
+function isPlaceAnchor(a: Obj): boolean {
+  if (!(PLACE_SCOPES as unknown[]).includes(a.scope) || !isStr(a.quote) || !isStr(a.sourceSha256)) return false;
+  if (!optNum(a.slide) || !optNum(a.slideId) || !optStr(a.sheet) || !optStr(a.heading)) return false;
+  if (a.scope === "slide") return typeof a.slideId === "number";
+  if (a.scope === "sheet") return isStr(a.sheet);
+  if (a.scope === "heading") return isStr(a.heading);
+  return true;
+}
+
 /** 表示・保存に必要な項目がそろったノートか */
 export function isNote(v: unknown): v is Note {
   if (!isObj(v)) return false;
@@ -118,6 +128,7 @@ export function isNote(v: unknown): v is Note {
   if (!isObj(a)) return false;
   if (a.type === "text") return isTextAnchor(a);
   if (a.type === "cell") return isCellAnchor(a);
+  if (a.type === "place") return isPlaceAnchor(a);
   return false;
 }
 
@@ -147,6 +158,18 @@ export function serializeNotesFile(file: NotesFile): string {
 }
 
 function orderAnchor(a: Anchor) {
+  if (a.type === "place") {
+    return {
+      type: a.type,
+      scope: a.scope,
+      slide: a.slide,
+      slideId: a.slideId,
+      sheet: a.sheet,
+      heading: a.heading,
+      quote: a.quote,
+      sourceSha256: a.sourceSha256,
+    };
+  }
   if (a.type === "cell") {
     return {
       type: a.type,
