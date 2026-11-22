@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { containerText, linesOfRange, offsetOf, rangeFromOffsets, slideSpans, TextIndex } from "./dom";
+import { containerText, headingSpans, linesOfRange, offsetOf, rangeFromOffsets, slideSpans, TextIndex } from "./dom";
 
 function mount(html: string): HTMLElement {
   const root = document.createElement("div");
@@ -71,6 +71,16 @@ describe("TextIndex", () => {
   it("スライドの範囲を索引から求められる", () => {
     const root = mount(HTML);
     expect(slideSpans(root, new TextIndex(root))).toEqual(slideSpans(root));
+  });
+
+  it("見出しの文言・レベル・位置（空の見出しは除く）", () => {
+    const root = mount("<p>前文</p><h1> 1. 背景 </h1><p>本文</p><h2>1.1 経緯</h2><h3></h3>");
+    const text = containerText(root);
+    expect(headingSpans(root)).toEqual([
+      { text: "1. 背景", level: 1, start: text.indexOf(" 1. 背景") },
+      { text: "1.1 経緯", level: 2, start: text.indexOf("1.1 経緯") },
+    ]);
+    expect(headingSpans(root, new TextIndex(root))).toEqual(headingSpans(root));
   });
 
   it("大きな資料でもハイライトの Range 作成が全文走査より速い", () => {

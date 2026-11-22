@@ -1,6 +1,7 @@
 //! 資料メモ — バックエンド
 //!
-//! 非破壊の原則: 資料ファイルは読み取りのみ。書き込みは `<資料名>.notes.json` に限定する。
+//! 非破壊の原則: 資料ファイルは読み取りのみ。書き込みは `<資料名>.notes.json` と、
+//! 保存ダイアログで利用者が選んだ議事録の `.md` に限定する。
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -10,6 +11,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use tauri::ipc::Response;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 const NOTES_SUFFIX: &str = ".notes.json";
 const CONFIG_FILE: &str = ".document-memo-kakikomi.json";
@@ -382,6 +384,65 @@ fn remove_orphan_notes(root: &Path, canon: &Path, rel: &str, expected: &str) -> 
     fs::remove_file(&path).map_err(|e| format!("ノートファイルを削除できません: {e}"))
 }
 
+/// 議事録の保存先を確かめる。拡張子が無ければ `.md` を付ける。
+/// ノートを付けている資料（`<path>.notes.json` がある）や書き出し元の資料は上書きしない。
+fn minutes_target(path: PathBuf, source_doc: &Path) -> Result<PathBuf, String> {
+    let path = if path.extension().is_none() { path.with_extension("md") } else { path };
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if ext != "md" && ext != "markdown" && ext != "txt" {
+        return Err("議事録は .md（または .txt）で保存してください".to_string());
+    }
+    let mut notes = path.clone().into_os_string();
+    notes.push(NOTES_SUFFIX);
+    let same_as_source = match (fs::canonicalize(&path), fs::canonicalize(source_doc)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    };
+    if same_as_source || Path::new(&notes).exists() {
+        return Err(format!(
+            "ノートを付けている資料には上書きできません: {}",
+            path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+        ));
+    }
+    Ok(path)
+}
+
+/// 議事録の Markdown を、保存ダイアログで選んだ場所に書き出す（既定は資料と同じフォルダ）。
+/// 保存先はフロントエンドから受け取らず、ここで出したダイアログの結果だけを使う。
+/// 保存したファイルのパスを返す（キャンセルしたら None）。
+#[tauri::command]
+async fn save_minutes(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, FolderState>,
+    root: String,
+    rel: String,
+    file_name: String,
+    content: String,
+) -> Result<Option<String>, String> {
+    let (root_path, canon) = checked_root(&state, &root)?;
+    let source = resolve_existing(&root_path, &canon, &rel)?.ok_or_else(|| format!("資料が見つかりません: {rel}"))?;
+    let dir = source.parent().map(Path::to_path_buf).unwrap_or(root_path);
+    // 非同期コマンドはメインスレッドの外で動くので、ダイアログを待ってよい。
+    // 親ウィンドウを指定して、アプリの後ろに隠れないようにする（モーダルになる）
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .set_title("議事録を保存")
+        .set_directory(&dir)
+        .set_file_name(&file_name)
+        .add_filter("Markdown", &["md"])
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| format!("保存先を扱えません: {e}"))?;
+    let path = minutes_target(path, &source)?;
+    fs::write(&path, content.as_bytes()).map_err(|e| format!("保存に失敗しました: {e}"))?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
 /// 資料フォルダを開く。以降のコマンドはこのフォルダに対してのみ動く。
 /// - フォルダを監視し、変更されたファイルの相対パスを `fs-changed` イベントで通知する
 /// - 資料内の相対画像を表示できるよう asset プロトコルでこのフォルダを公開する
@@ -443,6 +504,7 @@ pub fn run() {
             write_notes,
             write_notes_backup,
             delete_orphan_notes,
+            save_minutes,
             open_folder
         ])
         .run(tauri::generate_context!())
@@ -471,6 +533,22 @@ mod tests {
         assert!(resolve(root, "C:\\x.md").is_err());
         #[cfg(unix)]
         assert!(resolve(root, "/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn minutes_target_refuses_annotated_documents() {
+        let root = temp_dir("minutes");
+        let doc = root.join("資料.docx");
+        fs::write(&doc, "x").unwrap();
+        // 拡張子が無ければ .md を付ける
+        assert_eq!(minutes_target(root.join("議事録"), &doc).unwrap(), root.join("議事録.md"));
+        assert!(minutes_target(root.join("議事録.md"), &doc).is_ok());
+        // ノートを付けている資料・書き出し元の資料・資料の形式には書かない
+        fs::write(root.join("spec.md"), "y").unwrap();
+        fs::write(root.join("spec.md.notes.json"), "{}").unwrap();
+        assert!(minutes_target(root.join("spec.md"), &doc).is_err());
+        assert!(minutes_target(doc.clone(), &doc).is_err());
+        assert!(minutes_target(root.join("a.xlsx"), &doc).is_err());
     }
 
     #[test]

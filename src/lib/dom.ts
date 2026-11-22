@@ -1,4 +1,5 @@
 import type { AnchorLocation, Scope } from "./anchor";
+import type { HeadingSpan } from "./place";
 
 /** 表示 DOM ⇔ テキストオフセットの変換ヘルパー */
 
@@ -156,6 +157,14 @@ export function slideSpans(root: Element, index: Pick<TextIndex, "offsetOf"> = {
     start: index.offsetOf(s, 0),
     end: index.offsetOf(s, s.childNodes.length),
   }));
+}
+
+/** 見出し（h1〜h6）の文言と表示テキスト上の位置。文言は locateInHtml の heading と同じく 60 文字まで */
+export function headingSpans(root: Element, index: Pick<TextIndex, "offsetOf"> = { offsetOf: (n, o) => offsetOf(root, n, o) }): HeadingSpan[] {
+  return Array.from(root.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6")).flatMap((h) => {
+    const text = h.textContent?.trim().slice(0, 60);
+    return text ? [{ text, level: Number(h.tagName[1]), start: index.offsetOf(h, 0) }] : [];
+  });
 }
 
 /** Range の位置を「段落番号＋直前の見出し」で表す（PowerPoint は「スライド番号＋そのタイトル」） */

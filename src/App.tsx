@@ -1,19 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileTree } from "./components/FileTree";
+import { MinutesDialog } from "./components/MinutesDialog";
 import { OrphanNotes } from "./components/OrphanNotes";
-import { NotesPanel, type NoteTarget, type SortMode } from "./components/NotesPanel";
+import { NotesPanel, type NoteFilter, type NoteTarget, type SortMode } from "./components/NotesPanel";
 import { SheetViewer, type CellSelection, type SheetViewerHandle } from "./components/SheetViewer";
 import { Viewer, type TextSelection, type ViewerHandle } from "./components/Viewer";
 import { usePaneLayout, PANE_MIN } from "./hooks/usePaneLayout";
 import type { SaveState } from "./hooks/useNotesStore";
 import { useWorkspace } from "./hooks/useWorkspace";
 import { createAnchor } from "./lib/anchor";
-import { buildNoteViews, cellHighlights as toCellHighlights, sortNoteViews, summarizeStale, textHighlights } from "./lib/noteViews";
+import { fieldsOf, fieldsPatch, hasTask, sameFields, type NoteFields } from "./lib/noteMeta";
+import {
+  buildNoteViews,
+  cellHighlights as toCellHighlights,
+  countByFilter,
+  filterNoteViews,
+  matchesFilter,
+  sortNoteViews,
+  summarizeStale,
+  textHighlights,
+} from "./lib/noteViews";
 import { type Anchor, nextNoteId, NOTES_SUFFIX } from "./lib/notesFile";
+import { createPlaceAnchor, placeOptions, type PlaceOption } from "./lib/place";
 import { createCellAnchor, formatRef } from "./lib/sheet";
 
 /** 資料上の選択（Markdown・Word: テキスト範囲 / Excel: セル範囲） */
 type DocSelection = ({ kind: "text" } & TextSelection) | ({ kind: "cell" } & CellSelection);
+
+/** 書きかけのノート。選択範囲に付けるか、全体メモ（付け先の選択肢つき） */
+type Draft = DocSelection | { kind: "place"; quote: ""; places: PlaceOption[] };
 
 const SAVE_LABEL: Record<SaveState, string> = {
   none: "NOTES: ---",
@@ -25,10 +40,12 @@ const SAVE_LABEL: Record<SaveState, string> = {
 
 export default function App() {
   const [selection, setSelection] = useState<DocSelection | null>(null);
-  const [draft, setDraft] = useState<DocSelection | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [focusTick, setFocusTick] = useState(0);
   const [sortMode, setSortMode] = useState<SortMode>("position");
+  const [filter, setFilter] = useState<NoteFilter>("all");
+  const [minutesOpen, setMinutesOpen] = useState(false);
   const [treeOpen, setTreeOpen] = useState(true);
   const { layout, toggleLayout, paneSize, splitRef, startResize } = usePaneLayout();
 
@@ -43,6 +60,7 @@ export default function App() {
     doc,
     docText,
     slides,
+    headings,
     error,
     configError,
     notice,
@@ -64,10 +82,11 @@ export default function App() {
   // ---------- アンカー解決 ----------
 
   const views = useMemo(
-    () => buildNoteViews(notesFile, doc, docText, slides, (s, e) => viewerRef.current?.locate(s, e) ?? {}),
-    [notesFile, docText, doc, slides],
+    () => buildNoteViews(notesFile, doc, docText, slides, headings, (s, e) => viewerRef.current?.locate(s, e) ?? {}),
+    [notesFile, docText, doc, slides, headings],
   );
-  const sortedViews = useMemo(() => sortNoteViews(views, sortMode), [views, sortMode]);
+  const sortedViews = useMemo(() => sortNoteViews(filterNoteViews(views, filter), sortMode), [views, filter, sortMode]);
+  const filterCounts = useMemo(() => countByFilter(views), [views]);
   const highlights = useMemo(() => textHighlights(views), [views]);
   const cellHighlights = useMemo(() => toCellHighlights(views), [views]);
   const staleSummary = useMemo(() => summarizeStale(views), [views]);
@@ -83,7 +102,7 @@ export default function App() {
 
   /** 現在の資料の範囲からアンカーを作る */
   const makeAnchor = (t: NoteTarget): Anchor | null => {
-    if (!doc) return null;
+    if (!doc || t.kind === "point" || t.kind === "sheet") return null;
     if (t.kind === "cell") {
       const sheet = doc.kind === "xlsx" ? doc.book.sheets.find((s) => s.name === t.sheet) : undefined;
       return sheet ? createCellAnchor(sheet, t.range, doc.sha256) : null;
@@ -100,24 +119,48 @@ export default function App() {
     sheetRef.current?.clearSelection();
   }, [selection, canEdit]);
 
-  const saveDraft = (comment: string) => {
-    if (!draft) return;
-    const anchor = makeAnchor(draft);
+  /** 全体メモを書き始める。付け先は資料全体か、いま見ている場所（スライド・シート・見出しの節） */
+  const startPlaceDraft = useCallback(() => {
+    if (!doc || !canEdit) return;
+    const sheet = doc.kind === "xlsx" ? sheetRef.current?.currentSheet() : null;
+    const here: PlaceOption | null = sheet ? { scope: "sheet", sheet } : (viewerRef.current?.currentPlace() ?? null);
+    setDraft({ kind: "place", quote: "", places: placeOptions(here) });
+    setActiveId(null);
+    clearSelection();
+  }, [doc, canEdit]);
+
+  const saveDraft = (fields: NoteFields, place?: PlaceOption) => {
+    if (!draft || !doc) return;
+    const anchor = draft.kind === "place" ? createPlaceAnchor(place ?? { scope: "doc" }, doc.sha256) : makeAnchor(draft);
     if (!anchor) return;
     const now = new Date().toISOString();
     let newId = "";
     updateNotes((f) => {
       newId = nextNoteId(f.notes, f.invalid);
-      return { ...f, notes: [...f.notes, { id: newId, comment, createdAt: now, updatedAt: now, anchor }] };
+      return { ...f, notes: [...f.notes, { id: newId, ...fieldsPatch(fields), createdAt: now, updatedAt: now, anchor }] };
     });
     setDraft(null);
     setActiveId(newId);
+    // 追加したノートが絞り込みで隠れないようにする
+    if (!matchesFilter(fieldsPatch(fields), filter)) setFilter("all");
   };
 
-  const updateComment = (id: string, comment: string) =>
+  const updateFields = (id: string, fields: NoteFields) =>
     updateNotes((f) => ({
       ...f,
-      notes: f.notes.map((n) => (n.id === id && n.comment !== comment ? { ...n, comment, updatedAt: new Date().toISOString() } : n)),
+      notes: f.notes.map((n) =>
+        n.id === id && !sameFields(fieldsOf(n), fields) ? { ...n, ...fieldsPatch(fields), updatedAt: new Date().toISOString() } : n,
+      ),
+    }));
+
+  /** 宿題の完了・質問の回答済みを切り替える */
+  const toggleDone = (id: string) =>
+    updateNotes((f) => ({
+      ...f,
+      notes: f.notes.map((n) => {
+        if (n.id !== id || !n.kind || !hasTask(n.kind)) return n;
+        return { ...n, ...fieldsPatch({ ...fieldsOf(n), done: !n.done }), updatedAt: new Date().toISOString() };
+      }),
     }));
 
   const deleteNote = (id: string) => {
@@ -131,6 +174,8 @@ export default function App() {
     setActiveId(id);
     setFocusTick((n) => n + 1);
     if (t.kind === "text") viewerRef.current?.scrollToRange(t.start, t.end);
+    else if (t.kind === "point") viewerRef.current?.scrollToRange(t.start, t.start + 1);
+    else if (t.kind === "sheet") sheetRef.current?.scrollToRange(t.sheet, { r1: 0, c1: 0, r2: 0, c2: 0 });
     else sheetRef.current?.scrollToRange(t.sheet, t.range);
   };
 
@@ -184,14 +229,16 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (minutesOpen) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "m") {
         e.preventDefault();
-        startDraft();
+        if (e.shiftKey) startPlaceDraft();
+        else startDraft();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [startDraft]);
+  }, [startDraft, startPlaceDraft, minutesOpen]);
 
   // ---------- 描画 ----------
 
@@ -352,10 +399,17 @@ export default function App() {
                 hasSelection={!!selection && canEdit}
                 sortMode={sortMode}
                 onSortMode={setSortMode}
+                filter={filter}
+                onFilter={setFilter}
+                counts={filterCounts}
+                onExportMinutes={() => setMinutesOpen(true)}
                 onAddFromSelection={startDraft}
+                onAddPlace={startPlaceDraft}
+                canAddPlace={canEdit}
                 onDraftSave={saveDraft}
                 onDraftCancel={() => setDraft(null)}
-                onUpdate={updateComment}
+                onUpdate={updateFields}
+                onToggleDone={toggleDone}
                 onDelete={deleteNote}
                 onJump={jumpTo}
                 onReattach={reattach}
@@ -372,9 +426,13 @@ export default function App() {
               selection.quote.length > 40 ? selection.quote.slice(0, 40) + "..." : selection.quote
             }"  |  Ctrl+M: ノート追加`
           : doc?.kind === "xlsx"
-            ? "セルをクリック・ドラッグで選択 (Shift+クリックで拡張 / 行・列番号で行・列全体) -> Ctrl+M: ノート追加  |  Ctrl+C: コピー"
-            : "テキスト選択 -> Ctrl+M: ノート追加  |  ハイライトをクリック: ノートへ移動"}
+            ? "セルをクリック・ドラッグで選択 (Shift+クリックで拡張 / 行・列番号で行・列全体) -> Ctrl+M: ノート追加  |  Ctrl+Shift+M: 全体メモ  |  Ctrl+C: コピー"
+            : "テキスト選択 -> Ctrl+M: ノート追加  |  Ctrl+Shift+M: 全体メモ  |  ハイライトをクリック: ノートへ移動"}
       </footer>
+
+      {minutesOpen && root && currentPath && (
+        <MinutesDialog root={root} docPath={currentPath} views={views} onClose={() => setMinutesOpen(false)} />
+      )}
     </div>
   );
 }

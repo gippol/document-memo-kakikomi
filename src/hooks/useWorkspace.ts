@@ -3,6 +3,7 @@ import { api, errMsg, NOTES_CONFLICT, type DocEntry, type OrphanNotes } from "..
 import { CONFIG_FILE, DEFAULT_CONFIG, parseConfig, type FolderConfig } from "../lib/config";
 import { loadDocument, type LoadedDoc } from "../lib/document";
 import type { SlideSpan } from "../lib/dom";
+import type { HeadingSpan } from "../lib/place";
 import { mergeNotesFiles, NOTES_SUFFIX, parseNotesFile, serializeNotesFile } from "../lib/notesFile";
 import { LS_KEYS, lsGet, lsSet } from "../lib/storage";
 import { useNotesStore } from "./useNotesStore";
@@ -32,6 +33,8 @@ export function useWorkspace({ onBeforeOpen }: Options) {
   const [docText, setDocText] = useState<string | null>(null);
   /** PowerPoint: 各スライドが表示テキスト上で占める範囲 */
   const [slides, setSlides] = useState<SlideSpan[]>([]);
+  /** Word・Markdown の見出しの位置（全体メモの付け先を探すのに使う） */
+  const [headings, setHeadings] = useState<HeadingSpan[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
   /** 操作の結果のお知らせ（閉じるまで表示） */
@@ -189,8 +192,9 @@ export function useWorkspace({ onBeforeOpen }: Options) {
   }, []);
 
   /** Viewer が描画し終えた表示テキストを受け取る */
-  const onTextReady = useCallback((text: string, spans: SlideSpan[]) => {
+  const onTextReady = useCallback((text: string, spans: SlideSpan[], hs: HeadingSpan[]) => {
     setSlides(spans);
+    setHeadings(hs);
     setDocText(text);
   }, []);
 
@@ -240,6 +244,7 @@ export function useWorkspace({ onBeforeOpen }: Options) {
     doc,
     docText,
     slides,
+    headings,
     error,
     configError,
     notice,

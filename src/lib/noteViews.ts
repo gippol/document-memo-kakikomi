@@ -1,9 +1,11 @@
 import { resolveAnchor, type AnchorLocation } from "./anchor";
 import type { LoadedDoc } from "./document";
 import type { SlideSpan } from "./dom";
-import type { NotesFile } from "./notesFile";
+import { isOpen, type NoteKind } from "./noteMeta";
+import type { Note, NotesFile } from "./notesFile";
+import { resolvePlace, type HeadingSpan } from "./place";
 import { formatRef, headerLabel, headersAt, resolveCellAnchor } from "./sheet";
-import type { NoteTarget, NoteView, SortMode } from "../components/NotesPanel";
+import type { NoteFilter, NoteTarget, NoteView, SortMode } from "../components/NotesPanel";
 import type { HighlightSpec } from "../components/Viewer";
 import type { CellHighlight } from "../components/SheetViewer";
 
@@ -19,10 +21,19 @@ export function buildNoteViews(
   doc: LoadedDoc | null,
   docText: string | null,
   slides: SlideSpan[],
+  headings: HeadingSpan[],
   locate: Locate,
 ): NoteView[] {
   if (!notesFile || !doc) return [];
+  const sheets = doc.kind === "xlsx" ? doc.book.sheets.map((s) => s.name) : [];
   return notesFile.notes.map((note): NoteView => {
+    if (note.anchor.type === "place") {
+      // 全体メモは文言に付けていないので、資料が更新されても古くならない
+      const r = resolvePlace(note.anchor, { slides, headings, sheets });
+      const base = { note, stale: false, target: r.target, sortKey: r.sortKey, place: r.place };
+      if (!r.found) return { ...base, status: "orphaned" };
+      return { ...base, status: "ok", slide: r.place.slide, slideId: r.place.slideId, heading: r.place.heading };
+    }
     const stale = note.anchor.sourceSha256 !== doc.sha256;
     const lost: NoteView = { note, status: "orphaned", stale, target: null, sortKey: Infinity };
     if (note.anchor.type === "cell") {
@@ -54,7 +65,8 @@ export function buildNoteViews(
             lineStart: note.anchor.lineStart,
             lineEnd: note.anchor.lineEnd,
             paragraph: note.anchor.paragraph,
-            heading: note.anchor.heading,
+            // 見出しを記録していなかった頃の Markdown のノートは、今の資料から求める
+            heading: note.anchor.heading ?? (doc.kind === "markdown" ? locate(r.start, r.end).heading : undefined),
             slide: note.anchor.slide,
             slideId: note.anchor.slideId,
           }
@@ -74,6 +86,49 @@ export function sortNoteViews(views: NoteView[], mode: SortMode): NoteView[] {
     arr.sort((a, b) => b.note.createdAt.localeCompare(a.note.createdAt));
   }
   return arr;
+}
+
+/** Markdown は行番号、Word は段落番号、PowerPoint はスライド番号、Excel はセル範囲で位置を表す（見つからなければ null） */
+export function locationLabel(v: NoteView): string | null {
+  if (v.status === "orphaned") return null;
+  if (v.place) {
+    if (v.place.scope === "doc") return "全体";
+    if (v.place.scope === "sheet") return v.place.sheet ?? null;
+    if (v.place.scope === "heading") return "§";
+  }
+  if (v.cell) return v.cell;
+  if (v.slide !== undefined) return `S${v.slide}`;
+  if (v.lineStart !== undefined) {
+    return v.lineEnd && v.lineEnd !== v.lineStart ? `L${v.lineStart}-${v.lineEnd}` : `L${v.lineStart}`;
+  }
+  if (v.paragraph !== undefined) return `¶${v.paragraph}`;
+  return null;
+}
+
+/** 種類が無いノートはメモ */
+export const kindOf = (n: Note): NoteKind => n.kind ?? "memo";
+
+/** 絞り込みに当てはまるノートか。open: 未完了の宿題・未回答の質問 */
+export function matchesFilter(note: Pick<Note, "kind" | "done">, filter: NoteFilter): boolean {
+  const kind = note.kind ?? "memo";
+  if (filter === "all") return true;
+  if (filter === "open") return isOpen({ kind, done: note.done });
+  return kind === filter;
+}
+
+export function filterNoteViews(views: NoteView[], filter: NoteFilter): NoteView[] {
+  return filter === "all" ? views : views.filter((v) => matchesFilter(v.note, filter));
+}
+
+/** 絞り込みボタンに出す件数 */
+export function countByFilter(views: NoteView[]): Record<NoteFilter, number> {
+  const c: Record<NoteFilter, number> = { all: views.length, open: 0, memo: 0, decision: 0, action: 0, question: 0 };
+  for (const v of views) {
+    const kind = kindOf(v.note);
+    c[kind]++;
+    if (isOpen({ ...v.note, kind })) c.open++;
+  }
+  return c;
 }
 
 export function textHighlights(views: NoteView[]): HighlightSpec[] {

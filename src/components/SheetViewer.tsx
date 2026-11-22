@@ -17,6 +17,8 @@ export interface CellSelection {
 export interface SheetViewerHandle {
   scrollToRange(sheet: string, range: CellRange): void;
   clearSelection(): void;
+  /** 表示中のシート名 */
+  currentSheet(): string | null;
 }
 
 interface Props {
@@ -175,6 +177,9 @@ export function SheetViewer(props: Props) {
     },
     clearSelection() {
       setSel(null);
+    },
+    currentSheet() {
+      return sheet?.name ?? null;
     },
   }));
 
