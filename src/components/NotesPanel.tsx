@@ -3,6 +3,7 @@ import type { AnchorLocation, AnchorStatus } from "../lib/anchor";
 import {
   applyShorthand,
   DONE_LABEL,
+  dueLabel,
   fieldsOf,
   formatDate,
   hasTask,
@@ -13,6 +14,7 @@ import {
   type NoteFields,
   type NoteKind,
 } from "../lib/noteMeta";
+import { locationLabel } from "../lib/noteViews";
 import type { Note } from "../lib/notesFile";
 import type { CellRange } from "../lib/sheet";
 
@@ -50,6 +52,7 @@ interface Props {
   onFilter(f: NoteFilter): void;
   /** 絞り込む前の件数 */
   counts: Record<NoteFilter, number>;
+  onExportMinutes(): void;
   onAddFromSelection(): void;
   onDraftSave(fields: NoteFields): void;
   onDraftCancel(): void;
@@ -84,29 +87,11 @@ const FILTERS: [NoteFilter, string][] = [
   ["open", "未完了"],
 ];
 
-/** Markdown は行番号、Word は段落番号、PowerPoint はスライド番号、Excel はセル範囲で位置を表す */
-function lineLabel(v: NoteView) {
-  if (v.status === "orphaned") return "---";
-  if (v.cell) return v.cell;
-  if (v.slide !== undefined) return `S${v.slide}`;
-  if (v.lineStart !== undefined) {
-    return v.lineEnd && v.lineEnd !== v.lineStart ? `L${v.lineStart}-${v.lineEnd}` : `L${v.lineStart}`;
-  }
-  if (v.paragraph !== undefined) return `¶${v.paragraph}`;
-  return "---";
-}
-
 function fmt(iso: string) {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-/** 期限の表示（今年なら年を省く） */
-function dueLabel(due: string, today: Date) {
-  const [y, m, d] = due.split("-").map(Number);
-  return y === today.getFullYear() ? `${m}/${d}` : `${y}/${m}/${d}`;
 }
 
 const SHORTHAND_HINT = "Ctrl+Enter: 保存 / Esc: キャンセル\n先頭に /決 /宿 /質 /メ で種類、@担当 !12/1 で担当者・期限";
@@ -234,7 +219,7 @@ function NoteCard(props: {
         <span className={active ? "text-accent" : ""}>{active ? ">" : " "}</span>
         {kind !== "memo" && <span className={KIND_STYLE[kind]}>[{KIND_LABEL[kind]}]</span>}
         <span className="text-accent">{note.id}</span>
-        <span>{lineLabel(view)}</span>
+        <span>{locationLabel(view) ?? "---"}</span>
         {tag && (
           <span className={view.status === "moved" ? "text-accent" : "text-warn"} title={tag.title}>
             [{tag.label}]
@@ -339,7 +324,15 @@ export function NotesPanel(props: Props) {
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-1 border-b border-line px-2 py-1">
         <span className="text-bright">NOTES ({props.filter === "all" ? counts.all : `${items.length}/${counts.all}`})</span>
-        <span className="ml-auto text-dim">sort:</span>
+        <button
+          onClick={props.onExportMinutes}
+          disabled={counts.all === 0}
+          className="btn ml-auto"
+          title="ノートから議事録（Markdown）を作り、コピー・保存します"
+        >
+          議事録
+        </button>
+        <span className="ml-[1ch] text-dim">sort:</span>
         {(
           [
             ["position", "位置"],

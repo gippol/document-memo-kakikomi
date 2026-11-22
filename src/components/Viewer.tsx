@@ -124,7 +124,8 @@ export function Viewer(props: Props) {
       const body = bodyRef.current;
       const r = indexRef.current?.rangeAt(start, end);
       if (!body || !r) return {};
-      return doc.kind === "markdown" ? linesOfRange(r) : locateInHtml(body, r);
+      // Markdown も議事録で議題ごとにまとめられるよう、直前の見出しを記録する
+      return doc.kind === "markdown" ? { ...linesOfRange(r), heading: locateInHtml(body, r).heading } : locateInHtml(body, r);
     },
     scrollToRange(start, end) {
       const sc = scrollRef.current;

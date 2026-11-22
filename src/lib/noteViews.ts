@@ -55,7 +55,8 @@ export function buildNoteViews(
             lineStart: note.anchor.lineStart,
             lineEnd: note.anchor.lineEnd,
             paragraph: note.anchor.paragraph,
-            heading: note.anchor.heading,
+            // 見出しを記録していなかった頃の Markdown のノートは、今の資料から求める
+            heading: note.anchor.heading ?? (doc.kind === "markdown" ? locate(r.start, r.end).heading : undefined),
             slide: note.anchor.slide,
             slideId: note.anchor.slideId,
           }
@@ -75,6 +76,18 @@ export function sortNoteViews(views: NoteView[], mode: SortMode): NoteView[] {
     arr.sort((a, b) => b.note.createdAt.localeCompare(a.note.createdAt));
   }
   return arr;
+}
+
+/** Markdown は行番号、Word は段落番号、PowerPoint はスライド番号、Excel はセル範囲で位置を表す（見つからなければ null） */
+export function locationLabel(v: NoteView): string | null {
+  if (v.status === "orphaned") return null;
+  if (v.cell) return v.cell;
+  if (v.slide !== undefined) return `S${v.slide}`;
+  if (v.lineStart !== undefined) {
+    return v.lineEnd && v.lineEnd !== v.lineStart ? `L${v.lineStart}-${v.lineEnd}` : `L${v.lineStart}`;
+  }
+  if (v.paragraph !== undefined) return `¶${v.paragraph}`;
+  return null;
 }
 
 /** 種類が無いノートはメモ */

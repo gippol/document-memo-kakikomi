@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileTree } from "./components/FileTree";
+import { MinutesDialog } from "./components/MinutesDialog";
 import { OrphanNotes } from "./components/OrphanNotes";
 import { NotesPanel, type NoteFilter, type NoteTarget, type SortMode } from "./components/NotesPanel";
 import { SheetViewer, type CellSelection, type SheetViewerHandle } from "./components/SheetViewer";
@@ -40,6 +41,7 @@ export default function App() {
   const [focusTick, setFocusTick] = useState(0);
   const [sortMode, setSortMode] = useState<SortMode>("position");
   const [filter, setFilter] = useState<NoteFilter>("all");
+  const [minutesOpen, setMinutesOpen] = useState(false);
   const [treeOpen, setTreeOpen] = useState(true);
   const { layout, toggleLayout, paneSize, splitRef, startResize } = usePaneLayout();
 
@@ -210,6 +212,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (minutesOpen) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "m") {
         e.preventDefault();
         startDraft();
@@ -217,7 +220,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [startDraft]);
+  }, [startDraft, minutesOpen]);
 
   // ---------- 描画 ----------
 
@@ -381,6 +384,7 @@ export default function App() {
                 filter={filter}
                 onFilter={setFilter}
                 counts={filterCounts}
+                onExportMinutes={() => setMinutesOpen(true)}
                 onAddFromSelection={startDraft}
                 onDraftSave={saveDraft}
                 onDraftCancel={() => setDraft(null)}
@@ -405,6 +409,10 @@ export default function App() {
             ? "セルをクリック・ドラッグで選択 (Shift+クリックで拡張 / 行・列番号で行・列全体) -> Ctrl+M: ノート追加  |  Ctrl+C: コピー"
             : "テキスト選択 -> Ctrl+M: ノート追加  |  ハイライトをクリック: ノートへ移動"}
       </footer>
+
+      {minutesOpen && root && currentPath && (
+        <MinutesDialog root={root} docPath={currentPath} views={views} onClose={() => setMinutesOpen(false)} />
+      )}
     </div>
   );
 }

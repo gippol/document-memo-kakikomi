@@ -60,8 +60,33 @@ export const api = {
    */
   deleteOrphanNotes: (root: string, rel: string, expected: string) =>
     invoke<void>("delete_orphan_notes", { root, rel, expected }),
+  /**
+   * 議事録の Markdown を保存する。保存先は Rust 側で出す保存ダイアログで選ぶ（既定は資料と同じフォルダ）。
+   * 保存したファイルのパスを返す（キャンセルしたら null）
+   */
+  saveMinutes: (root: string, rel: string, fileName: string, content: string) =>
+    invoke<string | null>("save_minutes", { root, rel, fileName, content }),
   /** 資料フォルダを登録して監視を始める。ほかのコマンドはこのフォルダに対してのみ動く */
   openFolder: (root: string) => invoke<void>("open_folder", { root }),
   onFsChanged: (cb: (paths: string[]) => void): Promise<UnlistenFn> =>
     listen<string[]>("fs-changed", (e) => cb(e.payload)),
 };
+
+/** クリップボードに文字列をコピーする（Clipboard API が使えなければ選択してコピー） */
+export async function copyText(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch {
+    /* 下の方法で試す */
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand("copy");
+  ta.remove();
+  if (!ok) throw new Error("クリップボードにコピーできません");
+}

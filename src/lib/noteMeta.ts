@@ -168,6 +168,12 @@ export function applyShorthand(fields: NoteFields, today: Date): NoteFields {
   return out;
 }
 
+/** 期限の表示（今年なら年を省く。例: 12/1、2027/1/15） */
+export function dueLabel(due: string, today: Date): string {
+  const [y, m, d] = due.split("-").map(Number);
+  return y === today.getFullYear() ? `${m}/${d}` : `${y}/${m}/${d}`;
+}
+
 // ---------- 状態 ----------
 
 /** 未完了の宿題・未回答の質問 */
