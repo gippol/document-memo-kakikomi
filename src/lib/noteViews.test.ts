@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createAnchor } from "./anchor";
 import type { LoadedDoc } from "./document";
 import type { Note, NotesFile } from "./notesFile";
-import { buildNoteViews, cellHighlights, sortNoteViews, summarizeStale, textHighlights } from "./noteViews";
+import { buildNoteViews, cellHighlights, countByFilter, filterNoteViews, sortNoteViews, summarizeStale, textHighlights } from "./noteViews";
 
 const OLD = "前置き。ここが重要な仕様です。後書き。";
 const NEW = "追記した段落。前置き。ここが重要な仕様です。後書き。";
@@ -87,5 +87,28 @@ describe("並べ替え・集計", () => {
 
   it("資料の更新で影響を受けたノートを数える", () => {
     expect(summarizeStale(views)).toEqual({ total: 1, moved: 0, fuzzy: 0, orphaned: 1 });
+  });
+});
+
+describe("種類での絞り込み", () => {
+  const notes: Note[] = [
+    note("m", OLD, "前置き", "v1"),
+    { ...note("d", OLD, "重要", "v1"), kind: "decision" },
+    { ...note("a1", OLD, "仕様", "v1"), kind: "action" },
+    { ...note("a2", OLD, "後書き", "v1"), kind: "action", done: true },
+    { ...note("q", OLD, "ここ", "v1"), kind: "question" },
+  ];
+  const views = buildNoteViews(file(notes), md(OLD, "v1"), OLD, [], locate);
+  const ids = (f: Parameters<typeof filterNoteViews>[1]) => filterNoteViews(views, f).map((v) => v.note.id);
+
+  it("種類ごと・未完了（宿題と質問）で絞り込む", () => {
+    expect(ids("all")).toEqual(["m", "d", "a1", "a2", "q"]);
+    expect(ids("memo")).toEqual(["m"]);
+    expect(ids("action")).toEqual(["a1", "a2"]);
+    expect(ids("open")).toEqual(["a1", "q"]);
+  });
+
+  it("件数", () => {
+    expect(countByFilter(views)).toEqual({ all: 5, open: 2, memo: 1, decision: 1, action: 2, question: 1 });
   });
 });

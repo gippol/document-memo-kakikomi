@@ -1,4 +1,5 @@
 import type { TextAnchor } from "./anchor";
+import { isDueDate, isNoteKind, type NoteKind } from "./noteMeta";
 import { parseRef, type CellAnchor } from "./sheet";
 
 /** Markdown・Word・PowerPoint はテキスト範囲、Excel はセル範囲にノートを付ける */
@@ -9,7 +10,15 @@ export const NOTES_SUFFIX = ".notes.json";
 
 export interface Note {
   id: string;
+  /** 種類。無いときはメモ（v1 の任意フィールド。古い版のアプリでも読める） */
+  kind?: NoteKind;
   comment: string;
+  /** 担当者（宿題・質問のみ） */
+  assignee?: string;
+  /** 期限 YYYY-MM-DD（宿題・質問のみ） */
+  due?: string;
+  /** 宿題は完了、質問は回答済み */
+  done?: boolean;
   createdAt: string;
   updatedAt: string;
   anchor: Anchor;
@@ -102,6 +111,9 @@ function isCellAnchor(a: Obj): boolean {
 export function isNote(v: unknown): v is Note {
   if (!isObj(v)) return false;
   if (!isStr(v.id) || !v.id || !isStr(v.comment) || !isStr(v.createdAt) || !isStr(v.updatedAt)) return false;
+  if (v.kind !== undefined && !isNoteKind(v.kind)) return false;
+  if (!optStr(v.assignee) || (v.due !== undefined && !isDueDate(v.due))) return false;
+  if (v.done !== undefined && typeof v.done !== "boolean") return false;
   const a = v.anchor;
   if (!isObj(a)) return false;
   if (a.type === "text") return isTextAnchor(a);
@@ -117,7 +129,12 @@ export function serializeNotesFile(file: NotesFile): string {
     notes: [
       ...file.notes.map((n) => ({
         id: n.id,
+        // メモ・空の項目は書かない（JSON.stringify は undefined のキーを出力しない）
+        kind: n.kind && n.kind !== "memo" ? n.kind : undefined,
         comment: n.comment,
+        assignee: n.assignee || undefined,
+        due: n.due || undefined,
+        done: n.done || undefined,
         createdAt: n.createdAt,
         updatedAt: n.updatedAt,
         anchor: orderAnchor(n.anchor),

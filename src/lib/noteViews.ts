@@ -1,9 +1,10 @@
 import { resolveAnchor, type AnchorLocation } from "./anchor";
 import type { LoadedDoc } from "./document";
 import type { SlideSpan } from "./dom";
-import type { NotesFile } from "./notesFile";
+import { isOpen, type NoteKind } from "./noteMeta";
+import type { Note, NotesFile } from "./notesFile";
 import { formatRef, headerLabel, headersAt, resolveCellAnchor } from "./sheet";
-import type { NoteTarget, NoteView, SortMode } from "../components/NotesPanel";
+import type { NoteFilter, NoteTarget, NoteView, SortMode } from "../components/NotesPanel";
 import type { HighlightSpec } from "../components/Viewer";
 import type { CellHighlight } from "../components/SheetViewer";
 
@@ -74,6 +75,32 @@ export function sortNoteViews(views: NoteView[], mode: SortMode): NoteView[] {
     arr.sort((a, b) => b.note.createdAt.localeCompare(a.note.createdAt));
   }
   return arr;
+}
+
+/** 種類が無いノートはメモ */
+export const kindOf = (n: Note): NoteKind => n.kind ?? "memo";
+
+/** 絞り込みに当てはまるノートか。open: 未完了の宿題・未回答の質問 */
+export function matchesFilter(note: Pick<Note, "kind" | "done">, filter: NoteFilter): boolean {
+  const kind = note.kind ?? "memo";
+  if (filter === "all") return true;
+  if (filter === "open") return isOpen({ kind, done: note.done });
+  return kind === filter;
+}
+
+export function filterNoteViews(views: NoteView[], filter: NoteFilter): NoteView[] {
+  return filter === "all" ? views : views.filter((v) => matchesFilter(v.note, filter));
+}
+
+/** 絞り込みボタンに出す件数 */
+export function countByFilter(views: NoteView[]): Record<NoteFilter, number> {
+  const c: Record<NoteFilter, number> = { all: views.length, open: 0, memo: 0, decision: 0, action: 0, question: 0 };
+  for (const v of views) {
+    const kind = kindOf(v.note);
+    c[kind]++;
+    if (isOpen({ ...v.note, kind })) c.open++;
+  }
+  return c;
 }
 
 export function textHighlights(views: NoteView[]): HighlightSpec[] {

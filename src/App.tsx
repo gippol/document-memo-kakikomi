@@ -1,14 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileTree } from "./components/FileTree";
 import { OrphanNotes } from "./components/OrphanNotes";
-import { NotesPanel, type NoteTarget, type SortMode } from "./components/NotesPanel";
+import { NotesPanel, type NoteFilter, type NoteTarget, type SortMode } from "./components/NotesPanel";
 import { SheetViewer, type CellSelection, type SheetViewerHandle } from "./components/SheetViewer";
 import { Viewer, type TextSelection, type ViewerHandle } from "./components/Viewer";
 import { usePaneLayout, PANE_MIN } from "./hooks/usePaneLayout";
 import type { SaveState } from "./hooks/useNotesStore";
 import { useWorkspace } from "./hooks/useWorkspace";
 import { createAnchor } from "./lib/anchor";
-import { buildNoteViews, cellHighlights as toCellHighlights, sortNoteViews, summarizeStale, textHighlights } from "./lib/noteViews";
+import { fieldsOf, fieldsPatch, hasTask, sameFields, type NoteFields } from "./lib/noteMeta";
+import {
+  buildNoteViews,
+  cellHighlights as toCellHighlights,
+  countByFilter,
+  filterNoteViews,
+  matchesFilter,
+  sortNoteViews,
+  summarizeStale,
+  textHighlights,
+} from "./lib/noteViews";
 import { type Anchor, nextNoteId, NOTES_SUFFIX } from "./lib/notesFile";
 import { createCellAnchor, formatRef } from "./lib/sheet";
 
@@ -29,6 +39,7 @@ export default function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [focusTick, setFocusTick] = useState(0);
   const [sortMode, setSortMode] = useState<SortMode>("position");
+  const [filter, setFilter] = useState<NoteFilter>("all");
   const [treeOpen, setTreeOpen] = useState(true);
   const { layout, toggleLayout, paneSize, splitRef, startResize } = usePaneLayout();
 
@@ -67,7 +78,8 @@ export default function App() {
     () => buildNoteViews(notesFile, doc, docText, slides, (s, e) => viewerRef.current?.locate(s, e) ?? {}),
     [notesFile, docText, doc, slides],
   );
-  const sortedViews = useMemo(() => sortNoteViews(views, sortMode), [views, sortMode]);
+  const sortedViews = useMemo(() => sortNoteViews(filterNoteViews(views, filter), sortMode), [views, filter, sortMode]);
+  const filterCounts = useMemo(() => countByFilter(views), [views]);
   const highlights = useMemo(() => textHighlights(views), [views]);
   const cellHighlights = useMemo(() => toCellHighlights(views), [views]);
   const staleSummary = useMemo(() => summarizeStale(views), [views]);
@@ -100,7 +112,7 @@ export default function App() {
     sheetRef.current?.clearSelection();
   }, [selection, canEdit]);
 
-  const saveDraft = (comment: string) => {
+  const saveDraft = (fields: NoteFields) => {
     if (!draft) return;
     const anchor = makeAnchor(draft);
     if (!anchor) return;
@@ -108,16 +120,30 @@ export default function App() {
     let newId = "";
     updateNotes((f) => {
       newId = nextNoteId(f.notes, f.invalid);
-      return { ...f, notes: [...f.notes, { id: newId, comment, createdAt: now, updatedAt: now, anchor }] };
+      return { ...f, notes: [...f.notes, { id: newId, ...fieldsPatch(fields), createdAt: now, updatedAt: now, anchor }] };
     });
     setDraft(null);
     setActiveId(newId);
+    // 追加したノートが絞り込みで隠れないようにする
+    if (!matchesFilter(fieldsPatch(fields), filter)) setFilter("all");
   };
 
-  const updateComment = (id: string, comment: string) =>
+  const updateFields = (id: string, fields: NoteFields) =>
     updateNotes((f) => ({
       ...f,
-      notes: f.notes.map((n) => (n.id === id && n.comment !== comment ? { ...n, comment, updatedAt: new Date().toISOString() } : n)),
+      notes: f.notes.map((n) =>
+        n.id === id && !sameFields(fieldsOf(n), fields) ? { ...n, ...fieldsPatch(fields), updatedAt: new Date().toISOString() } : n,
+      ),
+    }));
+
+  /** 宿題の完了・質問の回答済みを切り替える */
+  const toggleDone = (id: string) =>
+    updateNotes((f) => ({
+      ...f,
+      notes: f.notes.map((n) => {
+        if (n.id !== id || !n.kind || !hasTask(n.kind)) return n;
+        return { ...n, ...fieldsPatch({ ...fieldsOf(n), done: !n.done }), updatedAt: new Date().toISOString() };
+      }),
     }));
 
   const deleteNote = (id: string) => {
@@ -352,10 +378,14 @@ export default function App() {
                 hasSelection={!!selection && canEdit}
                 sortMode={sortMode}
                 onSortMode={setSortMode}
+                filter={filter}
+                onFilter={setFilter}
+                counts={filterCounts}
                 onAddFromSelection={startDraft}
                 onDraftSave={saveDraft}
                 onDraftCancel={() => setDraft(null)}
-                onUpdate={updateComment}
+                onUpdate={updateFields}
+                onToggleDone={toggleDone}
                 onDelete={deleteNote}
                 onJump={jumpTo}
                 onReattach={reattach}
