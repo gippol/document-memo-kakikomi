@@ -82,6 +82,14 @@ describe("buildMinutes", () => {
     expect(md).toContain("### （見出しなし）\n\n- 要確認（L8）\n  > ここが 重要な仕様\n");
   });
 
+  it("宿題・質問の引用・続きの行も 2 文字下げ（コードブロックにしない）", () => {
+    const md = buildMinutes([view({ kind: "action", comment: "1行目\n2行目", quote: "根拠" }, { paragraph: 1 })], {
+      ...opts,
+      includeQuotes: true,
+    });
+    expect(md).toContain("- [ ] 1行目\n  2行目（¶1）\n  > 根拠\n");
+  });
+
   it("複数行のコメントは字下げして続ける", () => {
     const md = buildMinutes([view({ comment: "1行目\n2行目" }, { heading: "A" })], opts);
     expect(md).toContain("- 1行目\n  2行目\n");

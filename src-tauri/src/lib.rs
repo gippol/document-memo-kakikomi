@@ -413,6 +413,7 @@ fn minutes_target(path: PathBuf, source_doc: &Path) -> Result<PathBuf, String> {
 #[tauri::command]
 async fn save_minutes(
     app: AppHandle,
+    window: tauri::Window,
     state: State<'_, FolderState>,
     root: String,
     rel: String,
@@ -422,10 +423,12 @@ async fn save_minutes(
     let (root_path, canon) = checked_root(&state, &root)?;
     let source = resolve_existing(&root_path, &canon, &rel)?.ok_or_else(|| format!("資料が見つかりません: {rel}"))?;
     let dir = source.parent().map(Path::to_path_buf).unwrap_or(root_path);
-    // 非同期コマンドはメインスレッドの外で動くので、ダイアログを待ってよい
+    // 非同期コマンドはメインスレッドの外で動くので、ダイアログを待ってよい。
+    // 親ウィンドウを指定して、アプリの後ろに隠れないようにする（モーダルになる）
     let Some(picked) = app
         .dialog()
         .file()
+        .set_parent(&window)
         .set_title("議事録を保存")
         .set_directory(&dir)
         .set_file_name(&file_name)

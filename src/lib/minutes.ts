@@ -62,7 +62,8 @@ function taskLine(v: NoteView, kind: NoteKind, today: Date): string {
   const n = v.note;
   const meta = [n.assignee && `@${n.assignee}`, n.due && `〜${dueLabel(n.due, today)}`].filter(Boolean).join(" ");
   const head = kind === "decision" ? "- " : `- [${n.done ? "x" : " "}] `;
-  const text = indentRest(body(v), kind === "decision" ? "  " : "      ");
+  // 箇条書きの続きは 2 文字下げる（4 文字以上下げると Markdown ではコードブロックになる）
+  const text = indentRest(body(v), "  ");
   return `${head}${text}${meta ? ` — ${meta}` : ""}（${sourceOf(v)}）`;
 }
 
@@ -98,7 +99,7 @@ export function buildMinutes(views: NoteView[], opts: MinutesOptions): string {
     out.push("", `## ${title}`, "");
     for (const v of items) {
       out.push(taskLine(v, kind, opts.today));
-      out.push(...quoteLine(v, kind === "decision" ? "  " : "      ", opts));
+      out.push(...quoteLine(v, "  ", opts));
     }
   }
 

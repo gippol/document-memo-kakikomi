@@ -249,10 +249,13 @@ function NoteCard(props: {
         props.flash ? "card-flash" : ""
       }`}
     >
-      <div className="flex gap-[1ch] text-dim">
+      {/* 狭いときは ID を省略して、種類・位置・日時は折り返さない */}
+      <div className="flex gap-[1ch] whitespace-nowrap text-dim [&>*]:shrink-0">
         <span className={active ? "text-accent" : ""}>{active ? ">" : " "}</span>
         {kind !== "memo" && <span className={KIND_STYLE[kind]}>[{KIND_LABEL[kind]}]</span>}
-        <span className="text-accent">{note.id}</span>
+        <span className="!shrink min-w-0 truncate text-accent" title={note.id}>
+          {note.id}
+        </span>
         <span>{locationLabel(view) ?? "---"}</span>
         {tag && (
           <span className={view.status === "moved" ? "text-accent" : "text-warn"} title={tag.title}>
@@ -262,7 +265,8 @@ function NoteCard(props: {
         {view.stale && view.status === "ok" && <span title="ノート作成後に資料が更新されています">[OLD]</span>}
         <span className="ml-auto">{fmt(note.createdAt)}</span>
       </div>
-      {view.heading && view.status !== "orphaned" && (
+      {/* 全体メモは付け先の行（◇）に見出し・スライドを出すので繰り返さない */}
+      {view.heading && view.status !== "orphaned" && !view.place && (
         <div className="truncate text-dim" title={view.heading}>
           § {view.heading}
         </div>
@@ -356,8 +360,8 @@ export function NotesPanel(props: Props) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-1 border-b border-line px-2 py-1">
-        <span className="text-bright">NOTES ({props.filter === "all" ? counts.all : `${items.length}/${counts.all}`})</span>
+      <div className="flex flex-wrap items-center gap-x-1 border-b border-line px-2 py-1">
+        <span className="whitespace-nowrap text-bright">NOTES ({props.filter === "all" ? counts.all : `${items.length}/${counts.all}`})</span>
         <button
           onClick={props.onExportMinutes}
           disabled={counts.all === 0}
