@@ -10,7 +10,8 @@ import { usePaneLayout, PANE_MIN } from "./hooks/usePaneLayout";
 import type { SaveState } from "./hooks/useNotesStore";
 import { useFolderNotes } from "./hooks/useFolderNotes";
 import { useWorkspace } from "./hooks/useWorkspace";
-import type { FolderNote } from "./lib/board";
+import { api, errMsg, NOTES_CONFLICT } from "./lib/api";
+import { collectBoard, dueAlertMessage, dueAlert, setNoteDone, type BoardItem, type FolderNote } from "./lib/board";
 import { createAnchor } from "./lib/anchor";
 import { fieldsOf, fieldsPatch, hasTask, sameFields, type NoteFields } from "./lib/noteMeta";
 import {
@@ -23,7 +24,7 @@ import {
   summarizeStale,
   textHighlights,
 } from "./lib/noteViews";
-import { type Anchor, nextNoteId, NOTES_SUFFIX } from "./lib/notesFile";
+import { type Anchor, nextNoteId, NOTES_SUFFIX, parseNotesFile, serializeNotesFile } from "./lib/notesFile";
 import { createPlaceAnchor, placeOptions, type PlaceOption } from "./lib/place";
 import { createCellAnchor, formatRef } from "./lib/sheet";
 import { supersedesOf } from "./lib/supersede";
@@ -67,6 +68,8 @@ export default function App() {
   const [minutesOpen, setMinutesOpen] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
   const [boardTab, setBoardTab] = useState<BoardTab>("tasks");
+  /** フォルダを開いたときの期限前の通知（閉じたら null） */
+  const [dueNotice, setDueNotice] = useState<string | null>(null);
   /** 置き換え元を選んでいる決定（開いている資料のノート ID） */
   const [supersedeFor, setSupersedeFor] = useState<string | null>(null);
   /** ボードで選んだノート。資料を開いて描画し終えたら該当箇所へ移動する */
@@ -256,6 +259,51 @@ export default function App() {
     else sheetRef.current?.scrollToRange(t.sheet, t.range);
   };
 
+  /**
+   * ボードから宿題を完了・質問を回答済みにする。
+   * 開いている資料はメモリ上のノートを変える（自動保存）。ほかの資料はノートファイルを読み直して、そのノートだけ変えて書き込む
+   * （読んでから書くまでに外部で変更されていたら書き込まない）
+   */
+  const setDoneFromBoard = async (item: BoardItem, done: boolean): Promise<string | null> => {
+    const now = new Date().toISOString();
+    if (item.docPath === currentPath) {
+      if (!canEdit) return "この資料のノートは今は編集できません";
+      updateNotes((f) => setNoteDone(f, item.note.id, done, now).file);
+      return null;
+    }
+    if (!root) return null;
+    try {
+      const json = await api.readNotes(root, item.docPath);
+      if (json === null) return `${item.docPath}${NOTES_SUFFIX} が見つかりません`;
+      const r = setNoteDone(parseNotesFile(json, item.docPath), item.note.id, done, now);
+      if (!r.found) return "ノートが見つかりません（外部で変更・削除された可能性があります）";
+      await api.writeNotes(root, item.docPath, serializeNotesFile(r.file), json);
+      return null;
+    } catch (e) {
+      return e === NOTES_CONFLICT ? "保存する直前にノートファイルが外部で変更されました。もう一度お試しください" : errMsg(e);
+    } finally {
+      void folderNotes.reload();
+    }
+  };
+
+  // フォルダを開いたら、期限切れ・今日・明日が期限の宿題・質問を知らせる
+  useEffect(() => {
+    setDueNotice(null);
+    if (!root) return;
+    let alive = true;
+    api
+      .listAllNotes(root)
+      .then((entries) => {
+        if (alive) setDueNotice(dueAlertMessage(dueAlert(collectBoard(entries, null).items, new Date())));
+      })
+      .catch(() => {
+        /* 通知だけなので、読めなくても何もしない */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [root]);
+
   /** ボードの項目を押したとき: その資料を開き、描画し終えてから該当箇所へ移動する（下の effect） */
   const jumpFromBoard = async (item: FolderNote) => {
     setBoardOpen(false);
@@ -441,6 +489,26 @@ export default function App() {
           </button>
         </div>
       )}
+      {dueNotice && (
+        <div className="flex items-center gap-2 border-b border-line px-3 py-1">
+          <span className="min-w-0 flex-1">
+            <span className="text-accent">[!]</span> {dueNotice}
+          </span>
+          <button
+            onClick={() => {
+              setBoardTab("tasks");
+              setBoardOpen(true);
+              setDueNotice(null);
+            }}
+            className="btn shrink-0"
+          >
+            BOARD で見る
+          </button>
+          <button onClick={() => setDueNotice(null)} className="btn shrink-0">
+            閉じる
+          </button>
+        </div>
+      )}
       {conflictNotice && (
         <div className="flex items-start gap-2 border-b border-line px-3 py-1 text-bright">
           <span className="min-w-0 flex-1">[!] {conflictNotice}</span>
@@ -582,6 +650,7 @@ export default function App() {
           decisions={folderNotes.decisions}
           error={folderNotes.error}
           onJump={(i) => void jumpFromBoard(i)}
+          onSetDone={setDoneFromBoard}
           onClose={() => setSupersedeFor(null)}
           pick={pick}
         />
@@ -595,6 +664,7 @@ export default function App() {
           decisions={folderNotes.decisions}
           error={folderNotes.error}
           onJump={(i) => void jumpFromBoard(i)}
+          onSetDone={setDoneFromBoard}
           onClose={() => setBoardOpen(false)}
         />
       )}

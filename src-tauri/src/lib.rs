@@ -217,13 +217,13 @@ fn walk(root: &Path, dir: &Path, out: &mut DocList) {
             }
         } else if let Some(doc) = doc_of_notes(path, name) {
             // 対応する資料が無いノートファイル
-            if fs::symlink_metadata(&doc).is_err() {
-                if let Some(rel) = to_rel(root, &doc) {
-                    out.orphans.push(OrphanNotes {
-                        path: rel,
-                        note_count: count_notes(path),
-                    });
-                }
+            if fs::symlink_metadata(&doc).is_err()
+                && let Some(rel) = to_rel(root, &doc)
+            {
+                out.orphans.push(OrphanNotes {
+                    path: rel,
+                    note_count: count_notes(path),
+                });
             }
         }
     });
@@ -267,7 +267,7 @@ fn list_documents(state: State<FolderState>, root: String) -> Result<DocList, St
         orphans: Vec::new(),
     };
     walk(&root_path, &root_path, &mut out);
-    out.docs.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+    out.docs.sort_by_key(|d| d.path.to_lowercase());
     out.orphans.sort_by_key(|o| o.path.to_lowercase());
     Ok(out)
 }

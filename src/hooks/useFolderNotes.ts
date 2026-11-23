@@ -49,5 +49,5 @@ export function useFolderNotes(root: string | null, open: boolean, currentPath: 
   const current = useMemo(() => (currentPath && notesFile ? { path: currentPath, file: notesFile } : null), [currentPath, notesFile]);
   const board = useMemo(() => (entries ? collectBoard(entries, current) : null), [entries, current]);
   const decisions = useMemo(() => (entries ? collectDecisions(entries, current) : null), [entries, current]);
-  return { board, decisions, error };
+  return { board, decisions, error, reload };
 }
