@@ -24,3 +24,7 @@ dist-ssr
 *.sw?
 
 vendor/*
+
+# samples/ で試しに付けたノート（競合時の退避ファイルも）
+samples/**/*.notes.json
+samples/**/*.notes.conflict-*.json
