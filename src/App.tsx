@@ -3,7 +3,7 @@ import { FileTree } from "./components/FileTree";
 import { MinutesDialog } from "./components/MinutesDialog";
 import { OrphanNotes } from "./components/OrphanNotes";
 import { NotesPanel, type NoteFilter, type NoteTarget, type SortMode } from "./components/NotesPanel";
-import { FolderBoard, type BoardTab } from "./components/FolderBoard";
+import { FolderBoard, type BoardTab, type PickSupersede } from "./components/FolderBoard";
 import { SheetViewer, type CellSelection, type SheetViewerHandle } from "./components/SheetViewer";
 import { Viewer, type TextSelection, type ViewerHandle } from "./components/Viewer";
 import { usePaneLayout, PANE_MIN } from "./hooks/usePaneLayout";
@@ -26,6 +26,7 @@ import {
 import { type Anchor, nextNoteId, NOTES_SUFFIX } from "./lib/notesFile";
 import { createPlaceAnchor, placeOptions, type PlaceOption } from "./lib/place";
 import { createCellAnchor, formatRef } from "./lib/sheet";
+import { supersedesOf } from "./lib/supersede";
 import { lastDeletedIndex, pushDeleted, removeNote, restoreNote, type DeletedNote } from "./lib/undo";
 
 /** 資料上の選択（Markdown・Word: テキスト範囲 / Excel: セル範囲） */
@@ -66,6 +67,8 @@ export default function App() {
   const [minutesOpen, setMinutesOpen] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
   const [boardTab, setBoardTab] = useState<BoardTab>("tasks");
+  /** 置き換え元を選んでいる決定（開いている資料のノート ID） */
+  const [supersedeFor, setSupersedeFor] = useState<string | null>(null);
   /** ボードで選んだノート。資料を開いて描画し終えたら該当箇所へ移動する */
   const [pendingJump, setPendingJump] = useState<{ path: string; id: string } | null>(null);
   /** 削除の取り消し用の履歴（新しいものが末尾。資料ごとに最後のものから戻す） */
@@ -103,10 +106,11 @@ export default function App() {
       setSelection(null);
       setPendingJump(null);
       setUndoToast(null);
+      setSupersedeFor(null);
     },
   });
   const { notesFile, notesError, saveState, saveError, conflictNotice, updateNotes } = notes;
-  const folderNotes = useFolderNotes(root, boardOpen, currentPath, notesFile);
+  const folderNotes = useFolderNotes(root, boardOpen || supersedeFor !== null, currentPath, notesFile);
 
   // ---------- アンカー解決 ----------
 
@@ -178,7 +182,15 @@ export default function App() {
     updateNotes((f) => ({
       ...f,
       notes: f.notes.map((n) =>
-        n.id === id && !sameFields(fieldsOf(n), fields) ? { ...n, ...fieldsPatch(fields), updatedAt: new Date().toISOString() } : n,
+        n.id === id && !sameFields(fieldsOf(n), fields)
+          ? {
+              ...n,
+              ...fieldsPatch(fields),
+              // 置き換えのリンクは決定のときだけ持つ
+              supersedes: fields.kind === "decision" ? n.supersedes : undefined,
+              updatedAt: new Date().toISOString(),
+            }
+          : n,
       ),
     }));
 
@@ -269,6 +281,32 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingJump, currentPath, doc, docText, views]);
 
+  /** 決定の置き換え元を設定する / 外す（開いている資料のノートだけを書き換える） */
+  const setSupersedes = (id: string, target: FolderNote | null) => {
+    if (!currentPath) return;
+    const link = target ? supersedesOf(target, currentPath) : undefined;
+    updateNotes((f) => ({
+      ...f,
+      notes: f.notes.map((n) => (n.id === id && n.kind === "decision" ? { ...n, supersedes: link, updatedAt: new Date().toISOString() } : n)),
+    }));
+  };
+
+  const supersedeNote = supersedeFor ? notesFile?.notes.find((n) => n.id === supersedeFor) : undefined;
+  const pick: PickSupersede | undefined =
+    supersedeFor && currentPath && supersedeNote
+      ? {
+          docPath: currentPath,
+          noteId: supersedeFor,
+          label: noteLabel(supersedeNote),
+          onPick: (target) => {
+            setSupersedes(supersedeFor, target);
+            setSupersedeFor(null);
+            setActiveId(supersedeFor);
+            setFocusTick((n) => n + 1);
+          },
+        }
+      : undefined;
+
   const reattach = (id: string) => {
     if (!selection) return;
     const anchor = makeAnchor(selection);
@@ -319,7 +357,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (minutesOpen || boardOpen) return;
+      if (minutesOpen || boardOpen || supersedeFor) return;
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "z") {
         // 入力欄では入力の取り消し。戻せる削除が無ければ何もしない
         if (isTextInput(e.target) || lastDeletedIndex(deleted, currentPath) < 0) return;
@@ -335,7 +373,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [startDraft, startPlaceDraft, minutesOpen, boardOpen, undoDelete, deleted, currentPath]);
+  }, [startDraft, startPlaceDraft, minutesOpen, boardOpen, supersedeFor, undoDelete, deleted, currentPath]);
 
   // ---------- 描画 ----------
 
@@ -517,6 +555,8 @@ export default function App() {
                 undo={undoInfo}
                 onUndo={undoDelete}
                 onDismissUndo={() => setUndoToast(null)}
+                onPickSupersede={(id) => canEdit && setSupersedeFor(id)}
+                onClearSupersede={(id) => setSupersedes(id, null)}
               />
             )}
           </aside>
@@ -533,6 +573,19 @@ export default function App() {
             ? "セルをクリック・ドラッグで選択 (Shift+クリックで拡張 / 行・列番号で行・列全体) -> Ctrl+M: ノート追加  |  Ctrl+Shift+M: 全体メモ  |  Ctrl+C: コピー"
             : "テキスト選択 -> Ctrl+M: ノート追加  |  Ctrl+Shift+M: 全体メモ  |  ハイライトをクリック: ノートへ移動"}
       </footer>
+
+      {pick && (
+        <FolderBoard
+          tab="decisions"
+          onTab={() => {}}
+          board={folderNotes.board}
+          decisions={folderNotes.decisions}
+          error={folderNotes.error}
+          onJump={(i) => void jumpFromBoard(i)}
+          onClose={() => setSupersedeFor(null)}
+          pick={pick}
+        />
+      )}
 
       {boardOpen && root && (
         <FolderBoard

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FolderNote, NotesFileEntry } from "./board";
-import { collectDecisions, groupLedger, ledgerMarkdown, searchLedger } from "./ledger";
+import { collectDecisions, groupLedger, ledgerMarkdown, searchLedger, withoutReplaced } from "./ledger";
+import { linkDecisions } from "./supersede";
 import { emptyNotesFile, serializeNotesFile, type Note } from "./notesFile";
 
 const TODAY = new Date(2026, 10, 23);
@@ -107,5 +108,43 @@ describe("ledgerMarkdown", () => {
       ].join("\n"),
     );
     expect(ledgerMarkdown([], TODAY)).toContain("（決定事項はありません）");
+  });
+});
+
+describe("置き換え", () => {
+  const old = item("予算は案A", at(13, 10), "会議/第3回.docx", "§ 2. 予算");
+  const next: FolderNote = {
+    ...item("予算は案Bに変更", at(20, 10), "会議/第4回.docx", "§ 2. 予算"),
+  };
+  next.note.supersedes = { id: old.note.id, doc: "第3回.docx", text: "予算は案A" };
+  const gone = item("期限を延ばす", at(21, 10), "会議/第4回.docx");
+  gone.note.supersedes = { id: "note-gone", doc: "../old/第1回.docx", text: "期限は11月末" };
+  const items = [old, next, gone];
+  const links = linkDecisions(items);
+
+  it("置き換えられた決定は取り消し線にし、経緯を下に添える", () => {
+    const md = ledgerMarkdown(groupLedger(items, "oldest"), TODAY, "", links);
+    expect(md).toContain(
+      [
+        "## 2026-11-13",
+        "",
+        "- ~~予算は案A~~（会議/第3回.docx § 2. 予算）",
+        "  - 置き換え先: 予算は案Bに変更（会議/第4回.docx § 2. 予算）",
+        "",
+        "## 2026-11-20",
+        "",
+        "- 予算は案Bに変更（会議/第4回.docx § 2. 予算）",
+        "  - 置き換え元: 予算は案A（会議/第3回.docx § 2. 予算）",
+        "",
+        "## 2026-11-21",
+        "",
+        "- 期限を延ばす（会議/第4回.docx）",
+        "  - 置き換え元: 期限は11月末（old/第1回.docx・見つかりません）",
+      ].join("\n"),
+    );
+  });
+
+  it("置き換えられた決定を除ける", () => {
+    expect(withoutReplaced(items, links).map((i) => i.note.comment)).toEqual(["予算は案Bに変更", "期限を延ばす"]);
   });
 });

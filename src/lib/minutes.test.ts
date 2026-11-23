@@ -90,6 +90,14 @@ describe("buildMinutes", () => {
     expect(md).toContain("- [ ] 1行目\n  2行目（¶1）\n  > 根拠\n");
   });
 
+  it("決定を変えたときは置き換え元を添える", () => {
+    const md = buildMinutes(
+      [view({ kind: "decision", comment: "予算は案Bに変更", supersedes: { id: "note-a", doc: "第3回.docx", text: "予算は案A" } }, { heading: "2. 予算", paragraph: 5 })],
+      opts,
+    );
+    expect(md).toContain("- 予算は案Bに変更（§ 2. 予算 ¶5）\n  - 置き換え元: 予算は案A\n");
+  });
+
   it("複数行のコメントは字下げして続ける", () => {
     const md = buildMinutes([view({ comment: "1行目\n2行目" }, { heading: "A" })], opts);
     expect(md).toContain("- 1行目\n  2行目\n");

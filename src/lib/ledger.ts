@@ -3,8 +3,9 @@
  * フォルダ内のすべての資料の決定事項を日付ごとにまとめ、文字で検索する（「あれいつ決めたっけ？」用）。
  */
 import { collectFolderNotes, itemText, sourceLabel, type CurrentNotes, type FolderNote, type FolderNotes, type NotesFileEntry } from "./board";
-import { indentRest } from "./minutes";
+import { indentRest, oneLine } from "./minutes";
 import { formatDate } from "./noteMeta";
+import { noteKey, resolveDoc, type DecisionLinks } from "./supersede";
 
 export type LedgerData = FolderNotes<FolderNote>;
 
@@ -63,8 +64,25 @@ export function groupLedger(items: FolderNote[], order: LedgerOrder): LedgerGrou
   return groups;
 }
 
-/** 台帳を Markdown にする（Slack・Confluence にそのまま貼れる） */
-export function ledgerMarkdown(groups: LedgerGroup[], today: Date, query = ""): string {
+/** 置き換えられた（新しい決定がある）決定を除く */
+export function withoutReplaced(items: FolderNote[], links: DecisionLinks): FolderNote[] {
+  return items.filter((i) => !links.replacedBy.get(noteKey(i))?.length);
+}
+
+/** 置き換え元の表示（見つからなければ控えの内容と記録した資料） */
+export function replacesLabel(item: FolderNote, links: DecisionLinks): string | null {
+  const s = item.note.supersedes;
+  if (!s) return null;
+  const target = links.replaces.get(noteKey(item));
+  if (target) return `${oneLineText(target)}（${sourceLabel(target)}）`;
+  return `${s.text || "（内容不明）"}（${resolveDoc(item.docPath, s.doc) ?? s.doc}・見つかりません）`;
+}
+
+/** 1 行にした内容（一覧・Markdown の経緯の行に使う） */
+export const oneLineText = (i: FolderNote) => oneLine(itemText(i), 80);
+
+/** 台帳を Markdown にする（Slack・Confluence にそのまま貼れる）。置き換えた・置き換えられた決定は下に経緯を添える */
+export function ledgerMarkdown(groups: LedgerGroup[], today: Date, query = "", links?: DecisionLinks): string {
   const total = groups.reduce((n, g) => n + g.items.length, 0);
   const out = [`# 決定事項（${formatDate(today)}）`, ""];
   if (query.trim()) out.push(`- 検索: ${query.trim()}`);
@@ -72,7 +90,14 @@ export function ledgerMarkdown(groups: LedgerGroup[], today: Date, query = ""): 
   if (groups.length === 0) out.push("", "（決定事項はありません）");
   for (const g of groups) {
     out.push("", `## ${g.date}`, "");
-    for (const i of g.items) out.push(`- ${indentRest(itemText(i), "  ")}（${sourceLabel(i)}）`);
+    for (const i of g.items) {
+      const newer = links?.replacedBy.get(noteKey(i)) ?? [];
+      const text = indentRest(itemText(i), "  ");
+      out.push(`- ${newer.length > 0 ? `~~${text}~~` : text}（${sourceLabel(i)}）`);
+      const older = links && replacesLabel(i, links);
+      if (older) out.push(`  - 置き換え元: ${older}`);
+      for (const n of newer) out.push(`  - 置き換え先: ${oneLineText(n)}（${sourceLabel(n)}）`);
+    }
   }
   return out.join("\n") + "\n";
 }

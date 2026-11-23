@@ -67,6 +67,9 @@ interface Props {
   onDelete(id: string): void;
   onJump(id: string): void;
   onReattach(id: string): void;
+  /** 決定の置き換え元を選ぶ（決定事項の台帳を開く） / 外す */
+  onPickSupersede(id: string): void;
+  onClearSupersede(id: string): void;
   /** 直前に削除したノート（取り消せる間だけ表示する） */
   undo: { label: string } | null;
   onUndo(): void;
@@ -238,6 +241,8 @@ function NoteCard(props: {
   onDelete(): void;
   onJump(): void;
   onReattach(): void;
+  onPickSupersede(): void;
+  onClearSupersede(): void;
 }) {
   const { view, active } = props;
   const { note } = view;
@@ -300,6 +305,18 @@ function NoteCard(props: {
         </>
       )}
 
+      {kind === "decision" && note.supersedes && !editing && (
+        <div className="mt-1 flex items-baseline gap-x-[1ch] text-dim">
+          <span className="shrink-0">← 置き換え元:</span>
+          <span className="min-w-0 flex-1 truncate" title={note.supersedes.text}>
+            {note.supersedes.text || "（内容不明）"}
+          </span>
+          <button onClick={props.onClearSupersede} className="btn shrink-0" title="置き換え元へのリンクを外します">
+            解除
+          </button>
+        </div>
+      )}
+
       {note.updatedAt !== note.createdAt && <div className="text-dim">updated {fmt(note.updatedAt)}</div>}
 
       {!editing && (
@@ -330,6 +347,15 @@ function NoteCard(props: {
               <button onClick={props.onJump} disabled={!view.target} className="btn">
                 ジャンプ
               </button>
+              {kind === "decision" && (
+                <button
+                  onClick={props.onPickSupersede}
+                  className="btn"
+                  title="決定を変えたとき、前の決定をフォルダ全体の決定事項から選んでリンクします（経緯を追えるように）"
+                >
+                  {note.supersedes ? "置き換え元を変更" : "置き換え元…"}
+                </button>
+              )}
               {(view.status !== "ok" || view.stale) && (
                 <button
                   onMouseDown={(e) => e.preventDefault()}
@@ -439,6 +465,8 @@ export function NotesPanel(props: Props) {
             onDelete={() => props.onDelete(v.note.id)}
             onJump={() => props.onJump(v.note.id)}
             onReattach={() => props.onReattach(v.note.id)}
+            onPickSupersede={() => props.onPickSupersede(v.note.id)}
+            onClearSupersede={() => props.onClearSupersede(v.note.id)}
           />
         ))}
       </div>
