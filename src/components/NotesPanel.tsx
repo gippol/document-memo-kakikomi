@@ -67,6 +67,10 @@ interface Props {
   onDelete(id: string): void;
   onJump(id: string): void;
   onReattach(id: string): void;
+  /** 直前に削除したノート（取り消せる間だけ表示する） */
+  undo: { label: string } | null;
+  onUndo(): void;
+  onDismissUndo(): void;
 }
 
 const STATUS_TAG: Record<AnchorStatus, { label: string; title: string } | null> = {
@@ -438,6 +442,20 @@ export function NotesPanel(props: Props) {
           />
         ))}
       </div>
+
+      {props.undo && (
+        <div role="status" className="flex items-center gap-1 border-t border-line bg-panel px-2 py-1">
+          <span className="min-w-0 flex-1 truncate" title={props.undo.label}>
+            削除しました: <span className="text-bright">{props.undo.label}</span>
+          </span>
+          <button onClick={props.onUndo} className="btn shrink-0" title="削除したノートを元に戻します (Ctrl+Z)">
+            元に戻す
+          </button>
+          <button onClick={props.onDismissUndo} className="btn shrink-0" title="閉じる（Ctrl+Z ではまだ戻せます）">
+            x
+          </button>
+        </div>
+      )}
 
       <div className="flex gap-1 border-t border-line px-2 py-1">
         <button
