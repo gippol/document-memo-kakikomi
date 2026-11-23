@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import type { NotesFileEntry } from "./board";
 
 export interface DocEntry {
   path: string;
@@ -41,6 +42,8 @@ export const api = {
     return typeof r === "string" ? r : null;
   },
   listDocuments: (root: string) => invoke<DocList>("list_documents", { root }),
+  /** フォルダ内のすべてのノートファイル（宿題・質問ボード用。中身の検証は parseNotesFile で行う） */
+  listAllNotes: (root: string) => invoke<NotesFileEntry[]>("list_all_notes", { root }),
   readDocument: (root: string, rel: string) => invoke<DocContent>("read_document", { root, rel }),
   readDocumentBytes: (root: string, rel: string) => invoke<ArrayBuffer>("read_document_bytes", { root, rel }),
   readConfig: (root: string) => invoke<string | null>("read_config", { root }),

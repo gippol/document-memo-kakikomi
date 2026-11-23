@@ -91,6 +91,7 @@ node $D stop      # アプリ・vite・tauri CLI を止める
 | `text [CSS]` / `eval <式>` | 画面の文字（入力欄は value）/ 任意の JS |
 | `shot [png]` | WebView の中身を撮る（ウィンドウが隠れていても撮れる） |
 | `desktop-shot [png]` / `front [タイトル]` / `dialog <タイトル> [SendKeys]` | ネイティブのダイアログ用 |
+| `click "BOARD" header` → `click "[宿題]<コメントの先頭>" "[role=dialog]"` | 宿題・質問ボードを開き、項目から該当箇所へ移動（行のボタンの文字は `[宿題]内容@担当〜期限資料 位置` とつながっている） |
 | `where` | 作業フォルダ・ログ・デモフォルダの場所 |
 
 ## Run (human path)
@@ -102,10 +103,10 @@ npm run tauri dev   # → ウィンドウが開く。前回開いたフォルダ
 ## Test
 
 ```bash
-npm test                       # vitest（101 件）
+npm test                       # vitest（110 件）
 npx tsc --noEmit -p .
 npm run build
-(cd src-tauri && cargo test)   # 9 件
+(cd src-tauri && cargo test)   # 10 件
 ```
 
 ## Gotchas

@@ -77,7 +77,7 @@ const STATUS_TAG: Record<AnchorStatus, { label: string; title: string } | null> 
 };
 
 /** 種類ごとの文字色（メモは目印を出さない） */
-const KIND_STYLE: Record<NoteKind, string> = {
+export const KIND_STYLE: Record<NoteKind, string> = {
   memo: "text-dim",
   decision: "text-[#9fd49f]",
   action: "text-accent",

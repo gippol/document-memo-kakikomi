@@ -177,43 +177,83 @@ fn count_notes(path: &Path) -> Option<usize> {
     json.get("notes")?.as_array().map(Vec::len)
 }
 
-fn walk(root: &Path, dir: &Path, out: &mut DocList) {
+/// フォルダ内のファイルを再帰的にたどる（隠しファイル・Word のロックファイル (~$xxx.docx)・SKIP_DIRS は除外。
+/// シンボリックリンクはたどらない）。f にはファイルのパスとファイル名を渡す
+fn visit_files(dir: &Path, f: &mut impl FnMut(&Path, &str)) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
-        // 隠しファイルと、Word が開いている間に作るロックファイル (~$xxx.docx) は除外
         if name.starts_with('.') || name.starts_with("~$") {
             continue;
         }
         let Ok(ft) = entry.file_type() else { continue };
         if ft.is_dir() {
             if !SKIP_DIRS.contains(&name.as_str()) {
-                walk(root, &path, out);
+                visit_files(&path, f);
             }
-        } else if ft.is_file() && is_supported(&path) {
-            if let Some(rel) = to_rel(root, &path) {
-                let mut np = path.clone().into_os_string();
+        } else if ft.is_file() {
+            f(&path, &name);
+        }
+    }
+}
+
+/// ノートファイルのパスから、対応形式の資料のパスを求める（ノートファイルでなければ None）
+fn doc_of_notes(path: &Path, name: &str) -> Option<PathBuf> {
+    let doc = path.with_file_name(name.strip_suffix(NOTES_SUFFIX)?);
+    is_supported(&doc).then_some(doc)
+}
+
+fn walk(root: &Path, dir: &Path, out: &mut DocList) {
+    visit_files(dir, &mut |path, name| {
+        if is_supported(path) {
+            if let Some(rel) = to_rel(root, path) {
+                let mut np = path.to_path_buf().into_os_string();
                 np.push(NOTES_SUFFIX);
                 out.docs.push(DocEntry {
                     path: rel,
                     has_notes: Path::new(&np).exists(),
                 });
             }
-        } else if ft.is_file() {
+        } else if let Some(doc) = doc_of_notes(path, name) {
             // 対応する資料が無いノートファイル
-            let Some(doc_name) = name.strip_suffix(NOTES_SUFFIX) else { continue };
-            let doc = path.with_file_name(doc_name);
-            if is_supported(&doc) && fs::symlink_metadata(&doc).is_err() {
+            if fs::symlink_metadata(&doc).is_err() {
                 if let Some(rel) = to_rel(root, &doc) {
                     out.orphans.push(OrphanNotes {
                         path: rel,
-                        note_count: count_notes(&path),
+                        note_count: count_notes(path),
                     });
                 }
             }
         }
-    }
+    });
+}
+
+/// フォルダ内のノートファイル 1 つ分（宿題・質問ボード用）
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NotesEntry {
+    /// 資料のルートからの相対パス（ノートファイルのパスから `.notes.json` を除いたもの）
+    path: String,
+    /// ノートファイルの内容（読めなければ None）
+    json: Option<String>,
+    /// 対応する資料があるか（無ければ孤立したノート）
+    doc_exists: bool,
+}
+
+fn collect_notes(root: &Path) -> Vec<NotesEntry> {
+    let mut out = Vec::new();
+    visit_files(root, &mut |path, name| {
+        let Some(doc) = doc_of_notes(path, name) else { return };
+        let Some(rel) = to_rel(root, &doc) else { return };
+        out.push(NotesEntry {
+            path: rel,
+            json: fs::read_to_string(path).ok(),
+            doc_exists: fs::symlink_metadata(&doc).is_ok(),
+        });
+    });
+    out.sort_by_key(|e| e.path.to_lowercase());
+    out
 }
 
 #[tauri::command]
@@ -230,6 +270,17 @@ fn list_documents(state: State<FolderState>, root: String) -> Result<DocList, St
     out.docs.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
     out.orphans.sort_by_key(|o| o.path.to_lowercase());
     Ok(out)
+}
+
+/// フォルダ内のすべてのノートファイルを読む（フォルダ全体の宿題・質問ボード用）。
+/// 中身の検証はフロントエンドの parseNotesFile で行う
+#[tauri::command]
+fn list_all_notes(state: State<FolderState>, root: String) -> Result<Vec<NotesEntry>, String> {
+    let (root_path, _) = checked_root(&state, &root)?;
+    if !root_path.is_dir() {
+        return Err(format!("フォルダが見つかりません: {root}"));
+    }
+    Ok(collect_notes(&root_path))
 }
 
 #[tauri::command]
@@ -497,6 +548,7 @@ pub fn run() {
         .manage(FolderState::default())
         .invoke_handler(tauri::generate_handler![
             list_documents,
+            list_all_notes,
             read_document,
             read_document_bytes,
             read_notes,
@@ -622,6 +674,32 @@ mod tests {
         assert_eq!(orphans, vec![("broken.md", None), ("sub/gone.docx", Some(1))]);
         assert_eq!(out.docs.len(), 1);
         assert!(out.docs[0].has_notes);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn collect_notes_reads_all_notes_files() {
+        let root = temp_dir("collect");
+        fs::write(root.join("a.md"), "x").unwrap();
+        fs::write(root.join("a.md.notes.json"), "A").unwrap();
+        fs::write(root.join("sub/gone.docx.notes.json"), "G").unwrap();
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(root.join(".git/h.md.notes.json"), "H").unwrap();
+        fs::create_dir_all(root.join("node_modules")).unwrap();
+        fs::write(root.join("node_modules/n.md.notes.json"), "N").unwrap();
+        fs::write(root.join("x.txt.notes.json"), "X").unwrap();
+        fs::write(root.join("a.md.notes.conflict-20261117-000000.json"), "C").unwrap();
+        let got: Vec<_> = collect_notes(&root)
+            .into_iter()
+            .map(|e| (e.path, e.json, e.doc_exists))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("a.md".to_string(), Some("A".to_string()), true),
+                ("sub/gone.docx".to_string(), Some("G".to_string()), false),
+            ]
+        );
         let _ = fs::remove_dir_all(&root);
     }
 

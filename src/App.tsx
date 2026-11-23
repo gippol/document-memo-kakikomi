@@ -3,11 +3,14 @@ import { FileTree } from "./components/FileTree";
 import { MinutesDialog } from "./components/MinutesDialog";
 import { OrphanNotes } from "./components/OrphanNotes";
 import { NotesPanel, type NoteFilter, type NoteTarget, type SortMode } from "./components/NotesPanel";
+import { TaskBoard } from "./components/TaskBoard";
 import { SheetViewer, type CellSelection, type SheetViewerHandle } from "./components/SheetViewer";
 import { Viewer, type TextSelection, type ViewerHandle } from "./components/Viewer";
 import { usePaneLayout, PANE_MIN } from "./hooks/usePaneLayout";
 import type { SaveState } from "./hooks/useNotesStore";
+import { useTaskBoard } from "./hooks/useTaskBoard";
 import { useWorkspace } from "./hooks/useWorkspace";
+import type { BoardItem } from "./lib/board";
 import { createAnchor } from "./lib/anchor";
 import { fieldsOf, fieldsPatch, hasTask, sameFields, type NoteFields } from "./lib/noteMeta";
 import {
@@ -46,6 +49,9 @@ export default function App() {
   const [sortMode, setSortMode] = useState<SortMode>("position");
   const [filter, setFilter] = useState<NoteFilter>("all");
   const [minutesOpen, setMinutesOpen] = useState(false);
+  const [boardOpen, setBoardOpen] = useState(false);
+  /** ボードで選んだノート。資料を開いて描画し終えたら該当箇所へ移動する */
+  const [pendingJump, setPendingJump] = useState<{ path: string; id: string } | null>(null);
   const [treeOpen, setTreeOpen] = useState(true);
   const { layout, toggleLayout, paneSize, splitRef, startResize } = usePaneLayout();
 
@@ -75,9 +81,11 @@ export default function App() {
       setDraft(null);
       setActiveId(null);
       setSelection(null);
+      setPendingJump(null);
     },
   });
   const { notesFile, notesError, saveState, saveError, conflictNotice, updateNotes } = notes;
+  const board = useTaskBoard(root, boardOpen, currentPath, notesFile);
 
   // ---------- アンカー解決 ----------
 
@@ -179,6 +187,31 @@ export default function App() {
     else sheetRef.current?.scrollToRange(t.sheet, t.range);
   };
 
+  /** ボードの項目を押したとき: その資料を開き、描画し終えてから該当箇所へ移動する（下の effect） */
+  const jumpFromBoard = async (item: BoardItem) => {
+    setBoardOpen(false);
+    if (item.docPath !== currentPath) await openDoc(item.docPath);
+    setPendingJump({ path: item.docPath, id: item.note.id });
+  };
+
+  useEffect(() => {
+    if (!pendingJump || pendingJump.path !== currentPath || !doc) return;
+    // 表示テキストができるまではアンカーを解決できない
+    if (doc.kind !== "xlsx" && docText === null) return;
+    setPendingJump(null);
+    const v = views.find((x) => x.note.id === pendingJump.id);
+    if (!v) return;
+    // 絞り込みで隠れていたら全部表示に戻す
+    if (!matchesFilter(v.note, filter)) setFilter("all");
+    if (v.target) jumpTo(v.note.id);
+    else {
+      // 資料から見つからないノートは、一覧で選ぶだけ
+      setActiveId(v.note.id);
+      setFocusTick((n) => n + 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingJump, currentPath, doc, docText, views]);
+
   const reattach = (id: string) => {
     if (!selection) return;
     const anchor = makeAnchor(selection);
@@ -229,7 +262,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (minutesOpen) return;
+      if (minutesOpen || boardOpen) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "m") {
         e.preventDefault();
         if (e.shiftKey) startPlaceDraft();
@@ -238,7 +271,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [startDraft, startPlaceDraft, minutesOpen]);
+  }, [startDraft, startPlaceDraft, minutesOpen, boardOpen]);
 
   // ---------- 描画 ----------
 
@@ -276,6 +309,9 @@ export default function App() {
         </button>
         <button onClick={pickFolder} className="btn" title={root}>
           {rootName}/
+        </button>
+        <button onClick={() => setBoardOpen(true)} className="btn" title="フォルダ全体の未完了の宿題・質問を一覧します">
+          BOARD
         </button>
         <span className="truncate text-bright">{currentPath ?? "--"}</span>
         {currentPath && (
@@ -358,6 +394,7 @@ export default function App() {
               />
             ) : doc && currentPath && doc.kind !== "xlsx" ? (
               <Viewer
+                key={currentPath}
                 ref={viewerRef}
                 doc={doc}
                 docAbsPath={docAbsPath}
@@ -429,6 +466,10 @@ export default function App() {
             ? "セルをクリック・ドラッグで選択 (Shift+クリックで拡張 / 行・列番号で行・列全体) -> Ctrl+M: ノート追加  |  Ctrl+Shift+M: 全体メモ  |  Ctrl+C: コピー"
             : "テキスト選択 -> Ctrl+M: ノート追加  |  Ctrl+Shift+M: 全体メモ  |  ハイライトをクリック: ノートへ移動"}
       </footer>
+
+      {boardOpen && root && (
+        <TaskBoard data={board.data} error={board.error} onJump={(i) => void jumpFromBoard(i)} onClose={() => setBoardOpen(false)} />
+      )}
 
       {minutesOpen && root && currentPath && (
         <MinutesDialog root={root} docPath={currentPath} views={views} onClose={() => setMinutesOpen(false)} />
