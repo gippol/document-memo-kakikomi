@@ -26,12 +26,27 @@ import {
 import { type Anchor, nextNoteId, NOTES_SUFFIX } from "./lib/notesFile";
 import { createPlaceAnchor, placeOptions, type PlaceOption } from "./lib/place";
 import { createCellAnchor, formatRef } from "./lib/sheet";
+import { lastDeletedIndex, pushDeleted, removeNote, restoreNote, type DeletedNote } from "./lib/undo";
 
 /** 資料上の選択（Markdown・Word: テキスト範囲 / Excel: セル範囲） */
 type DocSelection = ({ kind: "text" } & TextSelection) | ({ kind: "cell" } & CellSelection);
 
 /** 書きかけのノート。選択範囲に付けるか、全体メモ（付け先の選択肢つき） */
 type Draft = DocSelection | { kind: "place"; quote: ""; places: PlaceOption[] };
+
+/** 削除の取り消しのお知らせを出しておく時間（Ctrl+Z はその後も効く） */
+const UNDO_TOAST_MS = 10_000;
+
+/** 文字を入力している欄か（そこでの Ctrl+Z は入力の取り消しに使う） */
+const isTextInput = (t: EventTarget | null) =>
+  t instanceof HTMLElement && !!t.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']");
+
+/** お知らせに出すノートの名前（コメントの 1 行目か、付けた文言） */
+function noteLabel(n: { comment: string; anchor: { quote: string } }): string {
+  const first = n.comment.trim().split(/\r?\n/)[0];
+  const s = (first || n.anchor.quote || "（コメントなし）").replace(/\s+/g, " ");
+  return s.length > 40 ? s.slice(0, 40) + "…" : s;
+}
 
 const SAVE_LABEL: Record<SaveState, string> = {
   none: "NOTES: ---",
@@ -52,6 +67,10 @@ export default function App() {
   const [boardOpen, setBoardOpen] = useState(false);
   /** ボードで選んだノート。資料を開いて描画し終えたら該当箇所へ移動する */
   const [pendingJump, setPendingJump] = useState<{ path: string; id: string } | null>(null);
+  /** 削除の取り消し用の履歴（新しいものが末尾。資料ごとに最後のものから戻す） */
+  const [deleted, setDeleted] = useState<DeletedNote[]>([]);
+  /** 「削除しました [元に戻す]」を出しているノートの ID */
+  const [undoToast, setUndoToast] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(true);
   const { layout, toggleLayout, paneSize, splitRef, startResize } = usePaneLayout();
 
@@ -82,6 +101,7 @@ export default function App() {
       setActiveId(null);
       setSelection(null);
       setPendingJump(null);
+      setUndoToast(null);
     },
   });
   const { notesFile, notesError, saveState, saveError, conflictNotice, updateNotes } = notes;
@@ -172,9 +192,45 @@ export default function App() {
     }));
 
   const deleteNote = (id: string) => {
-    updateNotes((f) => ({ ...f, notes: f.notes.filter((n) => n.id !== id) }));
+    if (!currentPath) return;
+    const out: { deleted: DeletedNote | null } = { deleted: null };
+    updateNotes((f) => {
+      const r = removeNote(f, id, currentPath);
+      out.deleted = r.deleted;
+      return r.file;
+    });
+    if (out.deleted) {
+      const d = out.deleted;
+      setDeleted((list) => pushDeleted(list, d));
+      setUndoToast(id);
+    }
     if (activeId === id) setActiveId(null);
   };
+
+  /** この資料で最後に削除したノートを元の位置に戻す */
+  const undoDelete = useCallback(() => {
+    const i = lastDeletedIndex(deleted, currentPath);
+    if (i < 0 || !canEdit) return;
+    const d = deleted[i];
+    updateNotes((f) => restoreNote(f, d));
+    setDeleted((list) => list.filter((x) => x !== d));
+    setUndoToast(null);
+    setActiveId(d.note.id);
+    setFocusTick((n) => n + 1);
+    if (!matchesFilter(d.note, filter)) setFilter("all");
+  }, [deleted, currentPath, canEdit, updateNotes, filter]);
+
+  // フォルダを開き直したら履歴を捨てる
+  useEffect(() => setDeleted([]), [root]);
+
+  useEffect(() => {
+    if (!undoToast) return;
+    const t = setTimeout(() => setUndoToast(null), UNDO_TOAST_MS);
+    return () => clearTimeout(t);
+  }, [undoToast]);
+
+  const lastDeleted = deleted[lastDeletedIndex(deleted, currentPath)];
+  const undoInfo = undoToast && lastDeleted?.note.id === undoToast ? { label: noteLabel(lastDeleted.note) } : null;
 
   const jumpTo = (id: string) => {
     const t = views.find((x) => x.note.id === id)?.target;
@@ -263,6 +319,13 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (minutesOpen || boardOpen) return;
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "z") {
+        // 入力欄では入力の取り消し。戻せる削除が無ければ何もしない
+        if (isTextInput(e.target) || lastDeletedIndex(deleted, currentPath) < 0) return;
+        e.preventDefault();
+        undoDelete();
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "m") {
         e.preventDefault();
         if (e.shiftKey) startPlaceDraft();
@@ -271,7 +334,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [startDraft, startPlaceDraft, minutesOpen, boardOpen]);
+  }, [startDraft, startPlaceDraft, minutesOpen, boardOpen, undoDelete, deleted, currentPath]);
 
   // ---------- 描画 ----------
 
@@ -450,6 +513,9 @@ export default function App() {
                 onDelete={deleteNote}
                 onJump={jumpTo}
                 onReattach={reattach}
+                undo={undoInfo}
+                onUndo={undoDelete}
+                onDismissUndo={() => setUndoToast(null)}
               />
             )}
           </aside>
