@@ -37,13 +37,14 @@ function body(v: NoteView): string {
   return v.place ? "（コメントなし）" : `「${oneLine(v.note.anchor.quote)}」`;
 }
 
-/** 議題ごとにまとめるときの見出し（Excel はシート、PowerPoint はスライド） */
+/** 議題ごとにまとめるときの見出し（Excel はシート、PowerPoint はスライド、PDF はページ） */
 function groupOf(v: NoteView): string {
   if (v.status === "orphaned") return LOST;
   if (v.place?.scope === "doc") return WHOLE_DOC;
   if (v.place?.scope === "sheet") return v.place.sheet ?? NO_HEADING;
   if (v.cell) return v.cell.slice(0, v.cell.lastIndexOf("!"));
   if (v.slide !== undefined) return `S${v.slide} ${v.heading ?? ""}`.trim();
+  if (v.page !== undefined) return `p.${v.page}`;
   return v.heading || NO_HEADING;
 }
 

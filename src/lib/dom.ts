@@ -159,6 +159,20 @@ export function slideSpans(root: Element, index: Pick<TextIndex, "offsetOf"> = {
   }));
 }
 
+/** PDF のページがテキスト上で占める範囲 */
+export interface PageSpan extends Scope {
+  /** ページ番号（1 始まり） */
+  no: number;
+}
+
+export function pageSpans(root: Element, index: Pick<TextIndex, "offsetOf"> = { offsetOf: (n, o) => offsetOf(root, n, o) }): PageSpan[] {
+  return Array.from(root.querySelectorAll<HTMLElement>("section[data-page]")).map((s) => ({
+    no: Number(s.dataset.page),
+    start: index.offsetOf(s, 0),
+    end: index.offsetOf(s, s.childNodes.length),
+  }));
+}
+
 /** 見出し（h1〜h6）の文言と表示テキスト上の位置。文言は locateInHtml の heading と同じく 60 文字まで */
 export function headingSpans(root: Element, index: Pick<TextIndex, "offsetOf"> = { offsetOf: (n, o) => offsetOf(root, n, o) }): HeadingSpan[] {
   return Array.from(root.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6")).flatMap((h) => {
@@ -173,6 +187,9 @@ export function locateInHtml(root: Element, range: Range): AnchorLocation {
   const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
   const block = el?.closest("[data-para]") as HTMLElement | null;
   const slide = el?.closest("section[data-slide]") as HTMLElement | null;
+  const page = el?.closest("section[data-page]") as HTMLElement | null;
+  // PDF は見出しや段落の構造を持たないので、ページ番号だけで表す
+  if (page) return { page: Number(page.dataset.page) };
   if (slide) {
     const title = slide.dataset.title || `スライド ${slide.dataset.slide}`;
     return {

@@ -1,6 +1,6 @@
 import { resolveAnchor, type AnchorLocation } from "./anchor";
 import type { LoadedDoc } from "./document";
-import type { SlideSpan } from "./dom";
+import type { PageSpan, SlideSpan } from "./dom";
 import { isOpen, type NoteKind } from "./noteMeta";
 import type { Note, NotesFile } from "./notesFile";
 import { resolvePlace, type HeadingSpan } from "./place";
@@ -21,6 +21,7 @@ export function buildNoteViews(
   doc: LoadedDoc | null,
   docText: string | null,
   slides: SlideSpan[],
+  pages: PageSpan[],
   headings: HeadingSpan[],
   locate: Locate,
 ): NoteView[] {
@@ -29,10 +30,10 @@ export function buildNoteViews(
   return notesFile.notes.map((note): NoteView => {
     if (note.anchor.type === "place") {
       // 全体メモは文言に付けていないので、資料が更新されても古くならない
-      const r = resolvePlace(note.anchor, { slides, headings, sheets });
+      const r = resolvePlace(note.anchor, { slides, pages, headings, sheets });
       const base = { note, stale: false, target: r.target, sortKey: r.sortKey, place: r.place };
       if (!r.found) return { ...base, status: "orphaned" };
-      return { ...base, status: "ok", slide: r.place.slide, slideId: r.place.slideId, heading: r.place.heading };
+      return { ...base, status: "ok", slide: r.place.slide, slideId: r.place.slideId, page: r.place.page, heading: r.place.heading };
     }
     const stale = note.anchor.sourceSha256 !== doc.sha256;
     const lost: NoteView = { note, status: "orphaned", stale, target: null, sortKey: Infinity };
@@ -69,6 +70,7 @@ export function buildNoteViews(
             heading: note.anchor.heading ?? (doc.kind === "markdown" ? locate(r.start, r.end).heading : undefined),
             slide: note.anchor.slide,
             slideId: note.anchor.slideId,
+            page: note.anchor.page,
           }
         : locate(r.start, r.end);
     const target: NoteTarget = { kind: "text", start: r.start, end: r.end };
@@ -88,7 +90,7 @@ export function sortNoteViews(views: NoteView[], mode: SortMode): NoteView[] {
   return arr;
 }
 
-/** Markdown は行番号、Word は段落番号、PowerPoint はスライド番号、Excel はセル範囲で位置を表す（見つからなければ null） */
+/** Markdown は行番号、Word は段落番号、PowerPoint はスライド番号、PDF はページ番号、Excel はセル範囲で位置を表す（見つからなければ null） */
 export function locationLabel(v: NoteView): string | null {
   if (v.status === "orphaned") return null;
   if (v.place) {
@@ -98,6 +100,7 @@ export function locationLabel(v: NoteView): string | null {
   }
   if (v.cell) return v.cell;
   if (v.slide !== undefined) return `S${v.slide}`;
+  if (v.page !== undefined) return `p.${v.page}`;
   if (v.lineStart !== undefined) {
     return v.lineEnd && v.lineEnd !== v.lineStart ? `L${v.lineStart}-${v.lineEnd}` : `L${v.lineStart}`;
   }

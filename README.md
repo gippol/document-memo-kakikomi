@@ -1,6 +1,6 @@
 # 資料メモ
 
-会議資料（Markdown / Word / Excel / PowerPoint）を **一切書き換えず**、資料ごとの別ファイル `<資料名>.notes.json` にメモを残すデスクトップアプリです。
+会議資料（Markdown / Word / Excel / PowerPoint / PDF）を **一切書き換えず**、資料ごとの別ファイル `<資料名>.notes.json` にメモを残すデスクトップアプリです。
 （Tauri v2 + React + TypeScript + Tailwind CSS）
 
 ![サンプル画像](./images/sample.png)
@@ -14,13 +14,13 @@ npm run tauri build   # インストーラ作成
 npm test              # ユニットテスト
 ```
 
-`samples/` フォルダを開くと動作を試せます（`node scripts/make-sample-docx.mjs` / `make-sample-xlsx.mjs` / `make-sample-pptx.mjs` でサンプルの Word / Excel / PowerPoint を再生成）。
+`samples/` フォルダを開くと動作を試せます（`node scripts/make-sample-docx.mjs` / `make-sample-xlsx.mjs` / `make-sample-pptx.mjs` / `make-sample-pdf.mjs` でサンプルの Word / Excel / PowerPoint / PDF を再生成。PDF は Microsoft Edge で作ります）。
 
 ## 使い方
 
 1. `[ 資料フォルダを開く ]` でフォルダを選ぶ（前回のフォルダ・資料は自動で開き直します）
 2. 資料のテキスト（Excel はセル範囲）を選択 → `[ + ノート ]` ボタン / Ctrl+M / 右下のボタンでノート追加（Ctrl+Enter で保存）
-   - 資料にない話（脱線・口頭の補足）は `[ + 全体メモ ]` / Ctrl+Shift+M で、文言を選ばずに「資料全体」か「いま見ている場所」（PowerPoint は表示中のスライド、Excel は表示中のシート、Word・Markdown は画面上部の見出しの節）に付けられます
+   - 資料にない話（脱線・口頭の補足）は `[ + 全体メモ ]` / Ctrl+Shift+M で、文言を選ばずに「資料全体」か「いま見ている場所」（PowerPoint は表示中のスライド、PDF は表示中のページ、Excel は表示中のシート、Word・Markdown は画面上部の見出しの節）に付けられます
 3. ハイライトをクリックすると対応ノートへ、ノートの `[ ジャンプ ]` で資料の該当箇所へ移動
    - 削除したノートは、一覧の下の `[ 元に戻す ]` か Ctrl+Z で元の位置に戻せます（資料ごとに新しい順で 20 件まで。入力欄での Ctrl+Z は文字の取り消し）
 4. ノートには種類（メモ・決定・宿題・質問）を付けられます。宿題・質問には担当者・期限・完了（回答済み）を付けられ、一覧の `filter:` で種類や「未完了」に絞り込めます
@@ -44,8 +44,8 @@ npm test              # ユニットテスト
 
 ノート一覧の `[ 議事録 ]` で、開いている資料のノート（絞り込みに関係なく全件）から議事録の Markdown を作ります。
 
-- 決定事項・宿題・質問を先頭に集め、残りのメモは資料の見出し（Word・Markdown は直前の見出し、PowerPoint はスライド、Excel はシート）ごとにまとめます。どれも資料上の位置順です
-- 各行の末尾に出典（見出しと `¶12`・`L3`・`S3`・`予算!C4` などの位置）を付けます。「資料の引用を含める」で、ノートを付けた文言も `>` で添えます
+- 決定事項・宿題・質問を先頭に集め、残りのメモは資料の見出し（Word・Markdown は直前の見出し、PowerPoint はスライド、PDF はページ、Excel はシート）ごとにまとめます。どれも資料上の位置順です
+- 各行の末尾に出典（見出しと `¶12`・`L3`・`S3`・`p.2`・`予算!C4` などの位置）を付けます。「資料の引用を含める」で、ノートを付けた文言も `>` で添えます
 - 表示した Markdown はその場で手直しでき、`[ クリップボードにコピー ]` で Slack・Confluence などに貼れます
 - `[ .md で保存 ]` は保存ダイアログで場所を選びます（既定は資料と同じフォルダ、`<資料名>_議事録_<日付>.md`）。ノートを付けている資料や書き出し元の資料には上書きしません
 
@@ -119,6 +119,7 @@ npm test              # ユニットテスト
         "lineStart": 3, "lineEnd": 3,      // Markdown のとき
         "paragraph": 5, "heading": "2.1 …", // Word のとき
         "slide": 3, "slideId": 258,          // PowerPoint のとき（heading はスライドのタイトル）
+        "page": 2,                           // PDF のとき
         "sourceSha256": "…ノート作成時の資料のハッシュ"
       }
     }
@@ -130,7 +131,7 @@ npm test              # ユニットテスト
 - キー順を固定・整形して出力するので Git の差分が読みやすい
 - `supersedes` は決定を変えたときの前の決定です。`id` で探し（同じ ID が複数あれば `doc` で見分ける）、`doc` はこの資料のフォルダからの相対パス、`text` は置き換えたときの前の決定の内容の控えです
 
-全体メモは `anchor.type` が `"place"` で、`scope` が付け先です（`doc`: 資料全体 / `slide`: スライド / `sheet`: シート / `heading`: 見出しの節）。
+全体メモは `anchor.type` が `"place"` で、`scope` が付け先です（`doc`: 資料全体 / `slide`: スライド / `page`: PDF のページ / `sheet`: シート / `heading`: 見出しの節）。
 
 ```json
 "anchor": {
@@ -167,6 +168,7 @@ Excel のノートはセル範囲に付けます（`anchor.type` が `"cell"`）
 | Markdown (.md) | react-markdown + GFM | ソースの行番号 `L12-14` | ファイルそのもの |
 | Word (.docx) | mammoth.js で構造を HTML 化（見出し・段落・リスト・表・画像・リンク・脚注） | 段落番号 `¶12` ＋ 直前の見出し | 本文テキスト（再保存・書式・見出し設定の変更では変わらない） |
 | PowerPoint (.pptx) | スライドごとに文字のカードとして表示（タイトル・箇条書き・表・発表者ノート、画像などは目印） | スライド番号 `S3` ＋ スライドのタイトル | スライドの文字と発表者ノート（再保存・書式の変更では変わらない） |
+| PDF (.pdf) | pdf.js でページを画像にし、上に透明な文字の層を重ねる（見た目はそのまま） | ページ番号 `p.2` | ページの文字（書き出し直しで日時などだけ変わっても変わらない） |
 | Excel (.xlsx / .xlsm / .xls) | SheetJS でセルの表示値を表に（シートのタブ・結合セル・列幅・表示形式） | `予算!B3:D5` ＋ 行・列の見出し | シート名とセルの表示値（再保存・書式の変更では変わらない） |
 
 ### Word の見出しスタイル
@@ -203,6 +205,15 @@ Word の制限:
 - 非表示のスライドも「（非表示）」と付けて表示します
 - 古い `.ppt` 形式は非対応です
 
+### PDF
+
+- ページを縦に並べて表示し、左の「ページ一覧」から各ページへ移動できます（ノートの件数も表示）。ページの幅は表示欄に合わせます
+- 文字の入った PDF なら、文字を選んでノートを付けられます。スキャン画像だけの PDF は表示できますが文字を選べないので、全体メモ（資料全体・ページ）を使います
+- 康熙部首（`⽉` `⽇` など、フォントによって「月」「日」がこの文字で取り出される）や合字は普通の文字に直してから扱います
+- 段組みの PDF では、選択や引用の文字の順番が見た目と違うことがあります
+- パスワード付きの PDF は開けません。PDF 内のフォーム・注釈・リンクは表示しません
+- pdf.js の補助データ（日本語などの文字の対応表 `cmaps`、JBIG2・JPEG 2000 画像と ICC プロファイル用の wasm）をアプリに同梱しています。埋め込みの無い標準フォントは同梱せず、OS のフォントで代用します
+
 ### Excel
 
 - セルの値は Excel の表示形式（桁区切り・日付など）を適用した文字列で表示します。日付の既定の書式は日本語版 Excel に合わせて `2026/4/1` 形式
@@ -224,6 +235,8 @@ SheetJS は npm レジストリの版（0.18.5）が古く既知の脆弱性も�
 | 引用文が変更 | 引用文が書き換わっていた（あいまい検索で推定、波線ハイライト） |
 | 該当箇所なし | 見つからない。テキストを選択して「📍 選択範囲に付け直す」で手動修正 |
 
+PDF はページを入れ替えると番号が変わるので、ページで探す範囲を絞らず、資料全体から探します。
+
 PowerPoint の再アンカーは、スライド ID（スライドを並べ替えても変わらない）が同じスライドの中を優先して探し、見つからなければ資料全体から探します。スライドが移動しても、同じ文言が別のスライドにあっても、元のスライドを指し続けます。
 
 Excel の再アンカーは「記録位置に同じ値と見出し → 同じ値の並びを探して見出し一致・近さで選ぶ（行・列の挿入、シート名の変更に追従） → 行・列見出しの交点 → 記録位置の値が半分以上同じ」の順に試します。
@@ -238,6 +251,7 @@ Excel の再アンカーは「記録位置に同じ値と見出し → 同じ値
 - `src/lib/dom.ts` — 表示 DOM ⇔ テキストオフセット変換
 - `src/lib/document.ts` / `docx.ts` — 形式ごとの読み込み（Word は 見出しスタイル判定 → mammoth → DOMPurify → 段落番号付与）
 - `src/lib/pptx.ts` — PowerPoint の読み込み（JSZip でスライドの XML を読み、スライドごとの HTML に）
+- `src/lib/pdf.ts` — PDF の読み込み（pdf.js でページ画像と文字の層の HTML に）。補助データは `vite.config.ts` の `pdfjsAssets` で同梱
 - `src/lib/sheet.ts` / `xlsx.ts` — Excel のシートデータとセル範囲アンカー（SheetJS に依存しない） / SheetJS による読み込み
 - `src/lib/config.ts` — フォルダ設定 `.document-memo-kakikomi.json` の読み込み
 - `src/components/Viewer.tsx` — Markdown 表示、選択検知、CSS Custom Highlight API によるハイライト（資料 DOM を変更しない）
@@ -245,9 +259,17 @@ Excel の再アンカーは「記録位置に同じ値と見出し → 同じ値
 - `src/lib/noteMeta.ts` — ノートの種類・担当者・期限と、会議中の入力記法
 - `src/lib/minutes.ts` — ノートから議事録の Markdown を作る
 - `src/lib/board.ts` / `ledger.ts` / `supersede.ts` — フォルダ全体のノートの集め方と、宿題・質問ボードの集計（担当者別・期限順）・決定事項の台帳（日付ごと・検索）・決定の置き換えのリンク
-- `src/lib/place.ts` — 全体メモ（資料全体・スライド・シート・見出しの節）のアンカー
+- `src/lib/place.ts` — 全体メモ（資料全体・スライド・ページ・シート・見出しの節）のアンカー
 - `src/components/NotesPanel.tsx` / `FileTree.tsx` / `MinutesDialog.tsx` — ノート一覧・ファイルツリー・議事録の書き出し
 - `src/components/FolderBoard.tsx` / `TaskBoard.tsx` / `DecisionLedger.tsx` — フォルダ全体のノートのダイアログ（宿題・質問ボード / 決定事項の台帳）
+
+## ライセンス
+
+このアプリは MIT ライセンスです（`LICENSE`）。同梱しているライブラリ・データのライセンスは `THIRD_PARTY_LICENSES.md` にまとめ、ビルドしたアプリにも同じファイルを入れています。
+依存を追加・更新したら `node scripts/make-third-party-licenses.mjs` で作り直してください（npm の本番依存と pdf.js の補助データが対象。Rust のクレートはまだ含めていません）。
+
+主なもの: pdf.js（Apache-2.0）、SheetJS（Apache-2.0）、mammoth（BSD-2-Clause）、JSZip（MIT または GPL-3.0 から MIT を選択）、DOMPurify（MPL-2.0 または Apache-2.0）、diff-match-patch（Apache-2.0）、React ほか（MIT）。
+pdf.js の補助データは Adobe CMaps（BSD-3-Clause）、PDFium の JBIG2（BSD-3-Clause）、OpenJPEG（BSD-2-Clause）、qcms（MIT）など。
 
 ## 今後の拡張
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { containerText, headingSpans, linesOfRange, offsetOf, rangeFromOffsets, slideSpans, TextIndex } from "./dom";
+import { containerText, headingSpans, linesOfRange, locateInHtml, offsetOf, pageSpans, rangeFromOffsets, slideSpans, TextIndex } from "./dom";
 
 function mount(html: string): HTMLElement {
   const root = document.createElement("div");
@@ -103,5 +103,20 @@ describe("TextIndex", () => {
 
     console.log(`段落 5000・ハイライト 500 件: 従来 ${slow.toFixed(0)}ms, 索引 ${fast.toFixed(0)}ms`);
     expect(fast).toBeLessThan(slow);
+  });
+
+  it("PDF: ページの範囲と、選んだ文字のページ番号", () => {
+    const root = mount(
+      '<section class="pdf-page" data-page="1"><img alt=""><div class="textLayer"><span>あい</span><br><span>う</span></div></section>' +
+        '<section class="pdf-page" data-page="2"><img alt=""><div class="textLayer"><span>えお</span></div></section>',
+    );
+    const index = new TextIndex(root);
+    expect(index.text).toBe("あいうえお");
+    expect(pageSpans(root, index)).toEqual([
+      { no: 1, start: 0, end: 3 },
+      { no: 2, start: 3, end: 5 },
+    ]);
+    expect(pageSpans(root, index)).toEqual(pageSpans(root));
+    expect(locateInHtml(root, index.rangeAt(3, 5)!)).toEqual({ page: 2 });
   });
 });

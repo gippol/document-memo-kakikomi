@@ -5,7 +5,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { trimRange, type AnchorLocation } from "../lib/anchor";
 import type { TextDoc } from "../lib/document";
-import { headingSpans, linesOfRange, locateInHtml, slideSpans, TextIndex, type SlideSpan } from "../lib/dom";
+import { headingSpans, linesOfRange, locateInHtml, pageSpans, slideSpans, TextIndex, type PageSpan, type SlideSpan } from "../lib/dom";
 import type { HeadingSpan, PlaceOption } from "../lib/place";
 
 export interface HighlightSpec {
@@ -25,7 +25,7 @@ export interface ViewerHandle {
   /** 範囲の位置情報（Markdown: 行 / Word: 段落・見出し） */
   locate(start: number, end: number): AnchorLocation;
   scrollToRange(start: number, end: number): void;
-  /** いま見ている場所（PowerPoint: 表示中のスライド / Word・Markdown: 画面上部にかかる見出しの節）。全体メモの付け先に使う */
+  /** いま見ている場所（PowerPoint: 表示中のスライド / PDF: 表示中のページ / Word・Markdown: 画面上部にかかる見出しの節）。全体メモの付け先に使う */
   currentPlace(): PlaceOption | null;
 }
 
@@ -37,8 +37,8 @@ interface Props {
   highlights: HighlightSpec[];
   activeId: string | null;
   pending: { start: number; end: number } | null;
-  /** slides は PowerPoint のときだけ中身がある */
-  onTextReady(text: string, slides: SlideSpan[], headings: HeadingSpan[]): void;
+  /** slides は PowerPoint、pages は PDF のときだけ中身がある */
+  onTextReady(text: string, slides: SlideSpan[], pages: PageSpan[], headings: HeadingSpan[]): void;
   onSelectionChange(sel: TextSelection | null): void;
   onAddNote(): void;
   onClickOffset(offset: number): void;
@@ -116,6 +116,8 @@ export function Viewer(props: Props) {
   const [floatPos, setFloatPos] = useState<{ top: number; left: number } | null>(null);
   const [textVersion, setTextVersion] = useState(0);
   const [slides, setSlides] = useState<SlideSpan[]>([]);
+  const [pages, setPages] = useState<PageSpan[]>([]);
+  /** 一覧で示す「いまのスライド／ページ」の番号 */
   const [currentSlide, setCurrentSlide] = useState(1);
   /** 描画した本文のテキスト索引（本文が変わるたびに作り直す） */
   const indexRef = useRef<TextIndex | null>(null);
@@ -135,6 +137,7 @@ export function Viewer(props: Props) {
         const s = slides.find((x) => x.no === currentSlide);
         return s ? { scope: "slide", slide: s.no, slideId: s.id, heading: s.title || undefined } : null;
       }
+      if (pages.length > 0) return { scope: "page", page: currentSlide };
       const body = bodyRef.current;
       const sc = scrollRef.current;
       if (!body || !sc) return null;
@@ -163,11 +166,34 @@ export function Viewer(props: Props) {
     const index = new TextIndex(bodyRef.current);
     indexRef.current = index;
     const spans = slideSpans(bodyRef.current, index);
+    const ps = pageSpans(bodyRef.current, index);
     setSlides(spans);
-    cbRef.current.onTextReady(index.text, spans, spans.length > 0 ? [] : headingSpans(bodyRef.current, index));
+    setPages(ps);
+    cbRef.current.onTextReady(index.text, spans, ps, spans.length > 0 || ps.length > 0 ? [] : headingSpans(bodyRef.current, index));
     setTextVersion((v) => v + 1);
     setFloatPos(null);
   }, [docKey]);
+
+  // PDF: ページの幅を表示欄の幅に合わせる（文字の層も CSS の --total-scale-factor で一緒に伸び縮みする）
+  useEffect(() => {
+    const sc = scrollRef.current;
+    const body = bodyRef.current;
+    if (doc.kind !== "pdf" || !sc || !body) return;
+    const pageW = Math.max(
+      0,
+      ...Array.from(body.querySelectorAll<HTMLElement>("section[data-page]"), (s) => Number(s.style.getPropertyValue("--page-w")) || 0),
+    );
+    if (!pageW) return;
+    const fit = () => {
+      const pad = parseFloat(getComputedStyle(body).paddingLeft) + parseFloat(getComputedStyle(body).paddingRight);
+      const scale = Math.min(2, Math.max(0.4, (sc.clientWidth - pad) / pageW));
+      body.style.setProperty("--total-scale-factor", scale.toFixed(3));
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(sc);
+    return () => ro.disconnect();
+  }, [doc.kind, docKey]);
 
   // ハイライト描画
   useEffect(() => {
@@ -239,40 +265,51 @@ export function Viewer(props: Props) {
     return () => document.removeEventListener("selectionchange", onChange);
   }, []);
 
-  // PowerPoint: 画面の上 1/3 にあるスライドを「いまのスライド」として一覧で示す
+  // PowerPoint・PDF: スライド／ページの区切り（data-slide / data-page）
+  const unitAttr = doc.kind === "pdf" ? "page" : "slide";
+
+  // PowerPoint・PDF: 画面の上 1/3 にあるスライド／ページを「いまのスライド／ページ」として一覧で示す
   const onScroll = () => {
     const sc = scrollRef.current;
     const body = bodyRef.current;
-    if (!sc || !body || slides.length === 0) return;
+    if (!sc || !body || (slides.length === 0 && pages.length === 0)) return;
     const line = sc.getBoundingClientRect().top + sc.clientHeight / 3;
     let cur = 1;
-    for (const s of body.querySelectorAll<HTMLElement>("section[data-slide]")) {
+    for (const s of body.querySelectorAll<HTMLElement>(`section[data-${unitAttr}]`)) {
       if (s.getBoundingClientRect().top > line) break;
-      cur = Number(s.dataset.slide);
+      cur = Number(s.dataset[unitAttr]);
     }
     setCurrentSlide(cur);
   };
 
   const goSlide = (no: number) => {
     const sc = scrollRef.current;
-    const s = bodyRef.current?.querySelector(`section[data-slide="${no}"]`);
+    const s = bodyRef.current?.querySelector(`section[data-${unitAttr}="${no}"]`);
     if (!sc || !s) return;
     sc.scrollTo({ top: sc.scrollTop + s.getBoundingClientRect().top - sc.getBoundingClientRect().top - 12 });
   };
 
   const notesPerSlide = useMemo(() => {
+    const units: { no: number; start: number; end: number }[] = slides.length > 0 ? slides : pages;
     const m = new Map<number, number>();
     for (const h of highlights) {
-      const s = slides.find((sp) => h.start >= sp.start && h.start < sp.end);
+      const s = units.find((sp) => h.start >= sp.start && h.start < sp.end);
       if (s) m.set(s.no, (m.get(s.no) ?? 0) + 1);
     }
     return m;
-  }, [highlights, slides]);
+  }, [highlights, slides, pages]);
 
   const view = (
     <div ref={scrollRef} className="relative h-full min-w-0 flex-1 overflow-auto bg-paper" onScroll={onScroll}>
       {doc.kind === "markdown" && doc.encoding !== "UTF-8" && (
         <p className="mx-auto max-w-[820px] px-12 pt-3 text-xs text-ink-dim">文字コード: {doc.encoding} として表示しています</p>
+      )}
+      {doc.kind === "pdf" && doc.warnings.length > 0 && (
+        <ul className="mx-auto max-w-[820px] list-disc px-12 pt-3 pl-17 text-xs text-ink-dim">
+          {doc.warnings.map((w) => (
+            <li key={w}>{w}</li>
+          ))}
+        </ul>
       )}
       {doc.kind === "pptx" && doc.warnings.length > 0 && (
         <details className="mx-auto max-w-[820px] px-12 pt-3 text-xs text-ink-dim">
@@ -348,6 +385,25 @@ export function Viewer(props: Props) {
     </div>
   );
 
+  if (doc.kind === "pdf") {
+    return (
+      <div className="flex h-full">
+        <nav aria-label="ページ一覧" className="w-20 shrink-0 overflow-auto border-r border-line py-1 text-xs">
+          {pages.map((p) => (
+            <button
+              key={p.no}
+              className={`flex w-full gap-1 px-2 py-0.5 text-left hover:bg-line ${p.no === currentSlide ? "text-accent" : ""}`}
+              onClick={() => goSlide(p.no)}
+            >
+              <span>p.{p.no}</span>
+              {notesPerSlide.get(p.no) ? <span className="ml-auto shrink-0 text-dim">({notesPerSlide.get(p.no)})</span> : null}
+            </button>
+          ))}
+        </nav>
+        {view}
+      </div>
+    );
+  }
   if (doc.kind !== "pptx") return view;
   return (
     <div className="flex h-full">

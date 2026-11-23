@@ -11,6 +11,8 @@ export interface AnchorLocation {
   /** PowerPoint: スライド番号（表示用）と スライド ID（並べ替えても変わらない。再アンカーの手がかり） */
   slide?: number;
   slideId?: number;
+  /** PDF: ページ番号（1 始まり） */
+  page?: number;
 }
 
 /**
@@ -69,6 +71,7 @@ export function createAnchor(
     heading: loc?.heading,
     slide: loc?.slide,
     slideId: loc?.slideId,
+    page: loc?.page,
     sourceSha256,
   };
 }

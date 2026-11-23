@@ -72,10 +72,12 @@ export function whereOf(note: Note): string | null {
     if (a.scope === "doc") return "全体";
     if (a.scope === "sheet") return a.sheet ?? null;
     if (a.scope === "slide") return a.slide !== undefined ? `S${a.slide}` : null;
+    if (a.scope === "page") return a.page !== undefined ? `p.${a.page}` : null;
     return a.heading ? `§ ${a.heading}` : null;
   }
   if (a.type === "cell") return `${a.sheet}!${a.ref}`;
   if (a.slide !== undefined) return `S${a.slide}`;
+  if (a.page !== undefined) return `p.${a.page}`;
   const loc =
     a.lineStart !== undefined
       ? a.lineEnd && a.lineEnd !== a.lineStart

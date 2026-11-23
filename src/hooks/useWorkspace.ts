@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errMsg, NOTES_CONFLICT, type DocEntry, type OrphanNotes } from "../lib/api";
 import { CONFIG_FILE, DEFAULT_CONFIG, parseConfig, type FolderConfig } from "../lib/config";
 import { loadDocument, type LoadedDoc } from "../lib/document";
-import type { SlideSpan } from "../lib/dom";
+import type { PageSpan, SlideSpan } from "../lib/dom";
 import type { HeadingSpan } from "../lib/place";
 import { mergeNotesFiles, NOTES_SUFFIX, parseNotesFile, serializeNotesFile } from "../lib/notesFile";
 import { LS_KEYS, lsGet, lsSet } from "../lib/storage";
@@ -33,6 +33,8 @@ export function useWorkspace({ onBeforeOpen }: Options) {
   const [docText, setDocText] = useState<string | null>(null);
   /** PowerPoint: 各スライドが表示テキスト上で占める範囲 */
   const [slides, setSlides] = useState<SlideSpan[]>([]);
+  /** PDF のページ（PDF のときだけ中身がある） */
+  const [pages, setPages] = useState<PageSpan[]>([]);
   /** Word・Markdown の見出しの位置（全体メモの付け先を探すのに使う） */
   const [headings, setHeadings] = useState<HeadingSpan[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -195,13 +197,24 @@ export function useWorkspace({ onBeforeOpen }: Options) {
   }, []);
 
   /** Viewer が描画し終えた表示テキストを受け取る */
-  const onTextReady = useCallback((text: string, spans: SlideSpan[], hs: HeadingSpan[]) => {
+  const onTextReady = useCallback((text: string, spans: SlideSpan[], ps: PageSpan[], hs: HeadingSpan[]) => {
     setSlides(spans);
+    setPages(ps);
     setHeadings(hs);
     setDocText(text);
   }, []);
 
   // ---------- 外部での変更検知 ----------
+
+  // PDF のページ画像（blob URL）は、表示しなくなったら解放する
+  // （StrictMode で effect が 2 回走っても、表示中の URL は解放しない）
+  const shownPdfUrls = useRef<string[]>([]);
+  useEffect(() => {
+    const prev = shownPdfUrls.current;
+    const cur = doc?.kind === "pdf" ? doc.urls : [];
+    shownPdfUrls.current = cur;
+    if (prev !== cur) prev.forEach((u) => URL.revokeObjectURL(u));
+  }, [doc]);
 
   const handleFsChange = useRef<(paths: string[]) => void>(() => {});
   const treeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -223,8 +236,16 @@ export function useWorkspace({ onBeforeOpen }: Options) {
         .then((c) => {
           if (pathRef.current !== cur) return;
           // 表示内容が同じなら再描画しない（Word は見出し設定の変更でハッシュは同じでも HTML が変わる）
-          const view = (d: LoadedDoc) => (d.kind === "markdown" ? d.content : d.kind === "xlsx" ? d.sha256 : d.html);
-          setDoc((prev) => (prev && prev.sha256 === c.sha256 && view(prev) === view(c) ? prev : c));
+          // PDF のページ画像の URL は読み込むたびに変わるので比べない
+          const view = (d: LoadedDoc) =>
+            d.kind === "markdown" ? d.content : d.kind === "xlsx" ? d.sha256 : d.kind === "pdf" ? d.html.replace(/blob:[^"]*/g, "") : d.html;
+          setDoc((prev) => {
+            if (prev && prev.sha256 === c.sha256 && view(prev) === view(c)) {
+              if (c.kind === "pdf") c.urls.forEach((u) => URL.revokeObjectURL(u));
+              return prev;
+            }
+            return c;
+          });
           setError(null);
         })
         .catch((e) => setError(`資料「${cur}」を読み込めません: ${errMsg(e)}（移動・削除された可能性があります。リネーム・移動した場合は、一覧の「孤立したノート」から新しい資料へノートを付け替えられます）`));
@@ -247,6 +268,7 @@ export function useWorkspace({ onBeforeOpen }: Options) {
     doc,
     docText,
     slides,
+    pages,
     headings,
     error,
     configError,

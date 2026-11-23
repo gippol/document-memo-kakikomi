@@ -293,6 +293,85 @@ body {
   margin: 0.3em 0;
 }
 
+/* ---------- PDF（ページ画像＋透明な文字の層。pdf.js の pdf_viewer.css の textLayer を必要な分だけ移したもの） ---------- */
+.doc-pdf {
+  /* 1 = 72dpi。表示欄の幅に合わせて Viewer が書き換える */
+  --total-scale-factor: 1.25;
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+  max-width: none;
+  padding: 24px 24px 80px;
+  line-height: 1;
+}
+.doc-pdf .pdf-page {
+  position: relative;
+  width: calc(var(--total-scale-factor) * var(--page-w) * 1px);
+  height: calc(var(--total-scale-factor) * var(--page-h) * 1px);
+  margin: 0 auto 20px;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--color-rule);
+}
+.doc-pdf .pdf-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  user-select: none;
+  pointer-events: none;
+}
+.doc-pdf .textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.doc-pdf .textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.doc-pdf .textLayer > :not(.markedContent),
+.doc-pdf .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.doc-pdf .textLayer .markedContent {
+  display: contents;
+}
+.doc-pdf .textLayer ::selection {
+  background: rgb(0 90 200 / 0.3);
+  color: transparent;
+}
+/* ページ画像の文字が見えるよう、ハイライトは半透明にして文字の層の文字は出さない */
+.doc-pdf ::highlight(note),
+.doc-pdf ::highlight(note-stale) {
+  background-color: rgb(240 190 60 / 0.4);
+  color: transparent;
+}
+.doc-pdf ::highlight(note-active) {
+  background-color: rgb(230 120 0 / 0.45);
+  color: transparent;
+}
+.doc-pdf ::highlight(note-pending) {
+  background-color: rgb(0 90 200 / 0.3);
+  color: transparent;
+}
+
 /* ---------- Excel（シート） ---------- */
 .sheet-grid {
   table-layout: fixed;

@@ -92,6 +92,7 @@ export default function App() {
     doc,
     docText,
     slides,
+    pages,
     headings,
     error,
     configError,
@@ -118,8 +119,8 @@ export default function App() {
   // ---------- アンカー解決 ----------
 
   const views = useMemo(
-    () => buildNoteViews(notesFile, doc, docText, slides, headings, (s, e) => viewerRef.current?.locate(s, e) ?? {}),
-    [notesFile, docText, doc, slides, headings],
+    () => buildNoteViews(notesFile, doc, docText, slides, pages, headings, (s, e) => viewerRef.current?.locate(s, e) ?? {}),
+    [notesFile, docText, doc, slides, pages, headings],
   );
   const sortedViews = useMemo(() => sortNoteViews(filterNoteViews(views, filter), sortMode), [views, filter, sortMode]);
   const filterCounts = useMemo(() => countByFilter(views), [views]);
