@@ -17,20 +17,27 @@ export interface NotesFileEntry {
   docExists: boolean;
 }
 
-export interface BoardItem {
+/** フォルダ内のどこかの資料に付いたノート */
+export interface FolderNote {
   docPath: string;
   docExists: boolean;
   note: Note;
-  kind: "action" | "question";
   /** 資料上の位置（記録してある情報から。分からなければ null） */
   where: string | null;
 }
 
-export interface BoardData {
-  items: BoardItem[];
+export interface BoardItem extends FolderNote {
+  kind: "action" | "question";
+}
+
+/** フォルダ内のノートを集めた結果 */
+export interface FolderNotes<T extends FolderNote> {
+  items: T[];
   /** 読めなかったノートファイルの資料のパス */
   unreadable: string[];
 }
+
+export type BoardData = FolderNotes<BoardItem>;
 
 export interface BoardSummary {
   total: number;
@@ -80,26 +87,28 @@ export function whereOf(note: Note): string | null {
   return [a.heading && `§ ${a.heading}`, loc].filter(Boolean).join(" ") || null;
 }
 
-function openItems(path: string, docExists: boolean, notes: Note[]): BoardItem[] {
-  return notes.flatMap((note): BoardItem[] => {
-    const kind = note.kind;
-    if ((kind !== "action" && kind !== "question") || !isOpen({ kind, done: note.done })) return [];
-    return [{ docPath: path, docExists, note, kind, where: whereOf(note) }];
-  });
-}
-
 /**
- * ノートファイルから未完了の宿題・未回答の質問を集める。
- * current（開いている資料）はディスクの内容ではなくメモリ上のノートを使う。
+ * フォルダ内のノートファイルから、pick が返すノートを集める（null を返したノートは除く）。
+ * current（開いている資料）はディスクの内容ではなくメモリ上のノートを使う（未保存の編集を含む）。
  */
-export function collectBoard(entries: NotesFileEntry[], current: CurrentNotes | null): BoardData {
-  const items: BoardItem[] = [];
+export function collectFolderNotes<T extends FolderNote>(
+  entries: NotesFileEntry[],
+  current: CurrentNotes | null,
+  pick: (n: FolderNote) => T | null,
+): FolderNotes<T> {
+  const items: T[] = [];
   const unreadable: string[] = [];
+  const add = (path: string, docExists: boolean, notes: Note[]) => {
+    for (const note of notes) {
+      const item = pick({ docPath: path, docExists, note, where: whereOf(note) });
+      if (item) items.push(item);
+    }
+  };
   let currentSeen = false;
   for (const e of entries) {
     if (current && e.path === current.path) {
       currentSeen = true;
-      items.push(...openItems(e.path, e.docExists, current.file.notes));
+      add(e.path, e.docExists, current.file.notes);
       continue;
     }
     if (e.json === null) {
@@ -107,14 +116,23 @@ export function collectBoard(entries: NotesFileEntry[], current: CurrentNotes | 
       continue;
     }
     try {
-      items.push(...openItems(e.path, e.docExists, parseNotesFile(e.json, e.path).notes));
+      add(e.path, e.docExists, parseNotesFile(e.json, e.path).notes);
     } catch {
       unreadable.push(e.path);
     }
   }
   // まだ保存していない（ディスクにノートファイルが無い）開いている資料のノート
-  if (current && !currentSeen) items.push(...openItems(current.path, true, current.file.notes));
+  if (current && !currentSeen) add(current.path, true, current.file.notes);
   return { items, unreadable };
+}
+
+/** 未完了の宿題・未回答の質問を集める */
+export function collectBoard(entries: NotesFileEntry[], current: CurrentNotes | null): BoardData {
+  return collectFolderNotes(entries, current, (i) => {
+    const kind = i.note.kind;
+    if ((kind !== "action" && kind !== "question") || !isOpen({ kind, done: i.note.done })) return null;
+    return { ...i, kind };
+  });
 }
 
 /** 今週の日曜（週の終わり）の YYYY-MM-DD */
@@ -197,13 +215,13 @@ export function groupBoard(items: BoardItem[], grouping: BoardGrouping, today: D
 }
 
 /** 宿題・質問の本文（コメントが空なら付けた文言） */
-export function itemText(item: BoardItem): string {
+export function itemText(item: FolderNote): string {
   if (item.note.comment.trim()) return item.note.comment;
   const quote = item.note.anchor.quote;
   return quote ? `「${oneLine(quote)}」` : "（コメントなし）";
 }
 
-export function sourceLabel(item: BoardItem): string {
+export function sourceLabel(item: FolderNote): string {
   return [item.docPath, item.where].filter(Boolean).join(" ");
 }
 

@@ -92,6 +92,8 @@ node $D stop      # アプリ・vite・tauri CLI を止める
 | `shot [png]` | WebView の中身を撮る（ウィンドウが隠れていても撮れる） |
 | `desktop-shot [png]` / `front [タイトル]` / `dialog <タイトル> [SendKeys]` | ネイティブのダイアログ用 |
 | `click "BOARD" header` → `click "[宿題]<コメントの先頭>" "[role=dialog]"` | 宿題・質問ボードを開き、項目から該当箇所へ移動（行のボタンの文字は `[宿題]内容@担当〜期限資料 位置` とつながっている） |
+| `card <決定のコメント> "置き換え元…"` → `click "[決定]<前の決定の先頭>" "[role=dialog]"` | 決定の置き換え元を選ぶ（選べない行は disabled。外すのは `card <コメント> "解除"`） |
+| `click "決定事項" "[role=dialog]"` → `type <語>` → `click "[決定]<内容の先頭>" "[role=dialog]"` | 決定事項の台帳に切り替え、検索して移動（検索欄は開くとフォーカスされる。最後に開いたタブを覚えている） |
 | `card <コメント> "削除"` → `card <コメント> "y"` | ノートを削除（確認の y/n がある）。戻すのは `key z ctrl` か `click "元に戻す" aside` |
 | `where` | 作業フォルダ・ログ・デモフォルダの場所 |
 
@@ -104,7 +106,7 @@ npm run tauri dev   # → ウィンドウが開く。前回開いたフォルダ
 ## Test
 
 ```bash
-npm test                       # vitest（117 件）
+npm test                       # vitest（137 件）
 npx tsc --noEmit -p .
 npm run build
 (cd src-tauri && cargo test)   # 10 件

@@ -20,9 +20,24 @@ export interface Note {
   due?: string;
   /** 宿題は完了、質問は回答済み */
   done?: boolean;
+  /** 決定のみ: この決定で置き換えた前の決定 */
+  supersedes?: Supersedes;
   createdAt: string;
   updatedAt: string;
   anchor: Anchor;
+}
+
+/**
+ * 決定を変えたときの、前の決定への参照（経緯を追うため）。
+ * 前の決定は ID で探し、同じ ID が複数あれば doc で見分ける。
+ */
+export interface Supersedes {
+  /** 前の決定のノート ID */
+  id: string;
+  /** 前の決定を付けた資料の、この資料のフォルダからの相対パス（同じ資料ならファイル名） */
+  doc: string;
+  /** 置き換えたときの前の決定の内容（資料を読まずに表示するための控え） */
+  text: string;
 }
 
 export interface NotesFile {
@@ -117,6 +132,10 @@ function isPlaceAnchor(a: Obj): boolean {
   return true;
 }
 
+function isSupersedes(s: unknown): boolean {
+  return isObj(s) && isStr(s.id) && !!s.id && isStr(s.doc) && !!s.doc && isStr(s.text);
+}
+
 /** 表示・保存に必要な項目がそろったノートか */
 export function isNote(v: unknown): v is Note {
   if (!isObj(v)) return false;
@@ -124,6 +143,7 @@ export function isNote(v: unknown): v is Note {
   if (v.kind !== undefined && !isNoteKind(v.kind)) return false;
   if (!optStr(v.assignee) || (v.due !== undefined && !isDueDate(v.due))) return false;
   if (v.done !== undefined && typeof v.done !== "boolean") return false;
+  if (v.supersedes !== undefined && !isSupersedes(v.supersedes)) return false;
   const a = v.anchor;
   if (!isObj(a)) return false;
   if (a.type === "text") return isTextAnchor(a);
@@ -146,6 +166,7 @@ export function serializeNotesFile(file: NotesFile): string {
         assignee: n.assignee || undefined,
         due: n.due || undefined,
         done: n.done || undefined,
+        supersedes: n.supersedes ? { id: n.supersedes.id, doc: n.supersedes.doc, text: n.supersedes.text } : undefined,
         createdAt: n.createdAt,
         updatedAt: n.updatedAt,
         anchor: orderAnchor(n.anchor),

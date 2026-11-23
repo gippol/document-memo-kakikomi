@@ -100,6 +100,8 @@ export function buildMinutes(views: NoteView[], opts: MinutesOptions): string {
     for (const v of items) {
       out.push(taskLine(v, kind, opts.today));
       out.push(...quoteLine(v, "  ", opts));
+      // 決定を変えたときは、置き換えた前の決定を添える（控えの内容）
+      if (kind === "decision" && v.note.supersedes) out.push(`  - 置き換え元: ${oneLine(v.note.supersedes.text) || "（内容不明）"}`);
     }
   }
 
