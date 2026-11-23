@@ -105,7 +105,8 @@ function isTextAnchor(a: Obj): boolean {
     optNum(a.paragraph) &&
     optStr(a.heading) &&
     optNum(a.slide) &&
-    optNum(a.slideId)
+    optNum(a.slideId) &&
+    optNum(a.page)
   );
 }
 
@@ -125,8 +126,9 @@ function isCellAnchor(a: Obj): boolean {
 
 function isPlaceAnchor(a: Obj): boolean {
   if (!(PLACE_SCOPES as unknown[]).includes(a.scope) || !isStr(a.quote) || !isStr(a.sourceSha256)) return false;
-  if (!optNum(a.slide) || !optNum(a.slideId) || !optStr(a.sheet) || !optStr(a.heading)) return false;
+  if (!optNum(a.slide) || !optNum(a.slideId) || !optNum(a.page) || !optStr(a.sheet) || !optStr(a.heading)) return false;
   if (a.scope === "slide") return typeof a.slideId === "number";
+  if (a.scope === "page") return typeof a.page === "number";
   if (a.scope === "sheet") return isStr(a.sheet);
   if (a.scope === "heading") return isStr(a.heading);
   return true;
@@ -185,6 +187,7 @@ function orderAnchor(a: Anchor) {
       scope: a.scope,
       slide: a.slide,
       slideId: a.slideId,
+      page: a.page,
       sheet: a.sheet,
       heading: a.heading,
       quote: a.quote,
@@ -216,6 +219,7 @@ function orderAnchor(a: Anchor) {
     heading: a.heading,
     slide: a.slide,
     slideId: a.slideId,
+    page: a.page,
     sourceSha256: a.sourceSha256,
   };
 }

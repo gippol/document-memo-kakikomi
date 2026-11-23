@@ -117,6 +117,22 @@ describe("buildMinutes", () => {
     expect(md).toContain("### （資料に見つからないノート）\n\n- 消えた\n");
   });
 
+  it("PDF はページでまとめ、出典にページ番号を付ける", () => {
+    const md = buildMinutes(
+      [
+        view({ comment: "図の説明" }, { page: 2, sortKey: 10 }),
+        view({ kind: "decision", comment: "この案で進める" }, { page: 3, sortKey: 20 }),
+        view(
+          { comment: "口頭の補足", anchor: { type: "place", scope: "page", page: 2, quote: "p.2", sourceSha256: "x" } },
+          { place: { scope: "page", page: 2 }, page: 2, sortKey: 9.5 },
+        ),
+      ],
+      { ...opts, docPath: "資料.pdf" },
+    );
+    expect(md).toContain("## 決定事項\n\n- この案で進める（p.3）\n");
+    expect(md).toContain("### p.2\n\n- 口頭の補足\n- 図の説明（p.2）\n");
+  });
+
   it("全体メモは資料全体を先頭に、見出しの節のものはその見出しの先頭にまとめる", () => {
     const placeAnchor = (scope: "doc" | "heading", heading?: string) =>
       ({ type: "place", scope, heading, quote: heading ?? "", sourceSha256: "x" }) as const;

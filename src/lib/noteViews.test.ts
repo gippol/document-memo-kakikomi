@@ -25,17 +25,17 @@ const locate = () => ({ lineStart: 99, lineEnd: 99 });
 
 describe("buildNoteViews", () => {
   it("資料・ノートが無ければ空", () => {
-    expect(buildNoteViews(null, md(OLD, "v1"), OLD, [], [], locate)).toEqual([]);
-    expect(buildNoteViews(file([]), null, null, [], [], locate)).toEqual([]);
+    expect(buildNoteViews(null, md(OLD, "v1"), OLD, [], [], [], locate)).toEqual([]);
+    expect(buildNoteViews(file([]), null, null, [], [], [], locate)).toEqual([]);
   });
 
   it("同じ版で位置が変わらなければ記録した行番号を使う", () => {
-    const [v] = buildNoteViews(file([note("a", OLD, "重要な仕様", "v1")]), md(OLD, "v1"), OLD, [], [], locate);
+    const [v] = buildNoteViews(file([note("a", OLD, "重要な仕様", "v1")]), md(OLD, "v1"), OLD, [], [], [], locate);
     expect(v).toMatchObject({ status: "ok", stale: false, lineStart: 3, target: { kind: "text", start: OLD.indexOf("重要な仕様") } });
   });
 
   it("位置がずれていれば今の資料で位置情報を求め直す", () => {
-    const [v] = buildNoteViews(file([note("a", OLD, "重要な仕様", "v1")]), md(NEW, "v2"), NEW, [], [], locate);
+    const [v] = buildNoteViews(file([note("a", OLD, "重要な仕様", "v1")]), md(NEW, "v2"), NEW, [], [], [], locate);
     expect(v).toMatchObject({ status: "moved", stale: true, lineStart: 99, sortKey: NEW.indexOf("重要な仕様") });
   });
 
@@ -46,7 +46,7 @@ describe("buildNoteViews", () => {
       id: "c",
       anchor: { type: "cell", sheet: "S", ref: "A1", quote: "x", values: [["x"]], sourceSha256: "v1" },
     };
-    const views = buildNoteViews(file([gone, cell]), md("まったく別の内容", "v2"), "まったく別の内容", [], [], locate);
+    const views = buildNoteViews(file([gone, cell]), md("まったく別の内容", "v2"), "まったく別の内容", [], [], [], locate);
     expect(views.map((v) => [v.status, v.target, v.sortKey])).toEqual([
       ["orphaned", null, Infinity],
       ["orphaned", null, Infinity],
@@ -54,7 +54,7 @@ describe("buildNoteViews", () => {
   });
 
   it("表示テキストがまだ無いうちは orphaned 扱い", () => {
-    const [v] = buildNoteViews(file([note("a", OLD, "重要な仕様", "v1")]), md(OLD, "v1"), null, [], [], locate);
+    const [v] = buildNoteViews(file([note("a", OLD, "重要な仕様", "v1")]), md(OLD, "v1"), null, [], [], [], locate);
     expect(v.status).toBe("orphaned");
   });
 });
@@ -68,6 +68,7 @@ describe("並べ替え・集計", () => {
     ]),
     md(OLD, "v1"),
     OLD,
+    [],
     [],
     [],
     locate,
@@ -99,7 +100,7 @@ describe("種類での絞り込み", () => {
     { ...note("a2", OLD, "後書き", "v1"), kind: "action", done: true },
     { ...note("q", OLD, "ここ", "v1"), kind: "question" },
   ];
-  const views = buildNoteViews(file(notes), md(OLD, "v1"), OLD, [], [], locate);
+  const views = buildNoteViews(file(notes), md(OLD, "v1"), OLD, [], [], [], locate);
   const ids = (f: Parameters<typeof filterNoteViews>[1]) => filterNoteViews(views, f).map((v) => v.note.id);
 
   it("種類ごと・未完了（宿題と質問）で絞り込む", () => {
@@ -127,6 +128,7 @@ describe("全体メモ", () => {
       ]),
       md(NEW, "v2"),
       NEW,
+      [],
       [],
       [{ text: "見出し", level: 1, start: 5 }],
       locate,

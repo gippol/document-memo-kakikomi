@@ -15,7 +15,7 @@ use tauri_plugin_dialog::DialogExt;
 
 const NOTES_SUFFIX: &str = ".notes.json";
 const CONFIG_FILE: &str = ".document-memo-kakikomi.json";
-const SUPPORTED_EXT: &[&str] = &["md", "markdown", "docx", "pptx", "xlsx", "xlsm", "xls"];
+const SUPPORTED_EXT: &[&str] = &["md", "markdown", "docx", "pptx", "xlsx", "xlsm", "xls", "pdf"];
 const SKIP_DIRS: &[&str] = &["node_modules", "target", "dist"];
 
 /// いま開いている資料フォルダ。各コマンドはここに登録された root に対してのみ動く。

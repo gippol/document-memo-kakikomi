@@ -107,7 +107,7 @@ npm run tauri dev   # → ウィンドウが開く。前回開いたフォルダ
 ## Test
 
 ```bash
-npm test                       # vitest（141 件）
+npm test                       # vitest（148 件）
 npx tsc --noEmit -p .
 npm run build
 (cd src-tauri && cargo test)   # 10 件
@@ -120,6 +120,7 @@ npm run build
 - **`click` の前方一致に注意。** 絞り込みボタンは件数 0 だと消えるので、`click "未完了" aside` がカードの「未完了に戻す」を押してしまったことがある。絞り込みボタンの文字は `未完了 2` のように件数付き。
 - **保存ダイアログは `shot` に写らない**（WebView の外）。`front` → `desktop-shot`。キーを送る前に `dialog` がダイアログを前面に出すので、Enter がアプリの textarea に入ることはない。
 - **ネイティブのダイアログを開いたままにしない。** `save_minutes` はダイアログを待ち続ける。`dialog "議事録を保存" "{ESC}"` で閉じる。
+- **PDF の文字は細かい span に分かれる**（フォントの切り替わりで 1 文字ずつのこともある）ので、`select` で見つからないことが多い。`node $D eval "[...document.querySelectorAll('section[data-page=\"2\"] .textLayer span')].map(s=>s.textContent).join(' | ')"` で区切りを見て、1 つの span 内の文字を選ぶか、`eval` で 2 つの span にまたがる Range を作って `getSelection().addRange(r)` する。デモフォルダに PDF が無ければ `samples/週次報告.pdf` をコピーする（`demo-reset` はノートが消える）
 - **`click` で開いたクリップボードのコピーは本物の Windows のクリップボードを上書きする。**
 - **Rust を変更すると `tauri dev` がアプリを自動で再起動する**（CDP の接続先も変わる）。`node $D wait` で待ってから続ける。
 - **デモフォルダのノートは残しておく**（利用者の希望）。`demo` は既存のコピーをそのまま開く。まっさらにしたいときだけ `demo-reset`。

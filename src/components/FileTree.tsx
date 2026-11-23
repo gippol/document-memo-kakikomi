@@ -86,7 +86,7 @@ export function FileTree({ docs, current, onOpen }: Props) {
     );
 
   if (docs.length === 0) {
-    return <p className="p-2 text-dim">-- 資料ファイル (.md / .docx / .xlsx / .pptx) なし --</p>;
+    return <p className="p-2 text-dim">-- 資料ファイル (.md / .docx / .xlsx / .pptx / .pdf) なし --</p>;
   }
   return <nav className="py-1">{render(tree, 0)}</nav>;
 }

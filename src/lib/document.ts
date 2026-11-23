@@ -11,14 +11,16 @@ import type { SheetBook } from "./sheet";
  *   見出し設定の変更や書式だけの変更でもノートが「旧版」扱いにならない）
  * - Excel: シート名とセルの表示値のハッシュ（Word と同じ理由。書式だけの変更では旧版扱いにならない）
  * - PowerPoint: スライドの文字（発表者ノートを含む）のハッシュ（Word と同じ理由）
+ * - PDF: ページの文字のハッシュ（書き出し直しで日時などのメタ情報だけ変わっても旧版扱いにしない）
  */
 export type LoadedDoc =
   | { kind: "markdown"; content: string; sha256: string; encoding: string }
   | { kind: "docx"; html: string; sha256: string; warnings: string[]; headingStyles: Record<string, number> }
   | { kind: "xlsx"; book: SheetBook; sha256: string; warnings: string[] }
-  | { kind: "pptx"; html: string; sha256: string; warnings: string[]; slideCount: number };
+  | { kind: "pptx"; html: string; sha256: string; warnings: string[]; slideCount: number }
+  | { kind: "pdf"; html: string; sha256: string; warnings: string[]; pageCount: number; urls: string[] };
 
-/** テキストとして表示する資料（Markdown / Word / PowerPoint） */
+/** テキストとして表示する資料（Markdown / Word / PowerPoint / PDF） */
 export type TextDoc = Exclude<LoadedDoc, { kind: "xlsx" }>;
 
 export interface LoadOptions {
@@ -32,6 +34,7 @@ export function docKind(path: string): DocKind | null {
   if (/\.docx$/i.test(path)) return "docx";
   if (/\.(xlsx|xlsm|xls)$/i.test(path)) return "xlsx";
   if (/\.pptx$/i.test(path)) return "pptx";
+  if (/\.pdf$/i.test(path)) return "pdf";
   return null;
 }
 
@@ -85,6 +88,27 @@ async function loadOnce(root: string, path: string, opts: LoadOptions): Promise<
       html: converted.html,
       warnings: converted.warnings,
       slideCount: converted.slideCount,
+      sha256: await sha256Hex(converted.text),
+    };
+  }
+  if (kind === "pdf") {
+    const bytes = await api.readDocumentBytes(root, path);
+    // pdf.js も大きいので PDF を開くときだけ読み込む
+    const { pdfToHtml } = await import("./pdf");
+    let converted;
+    try {
+      converted = await pdfToHtml(bytes);
+    } catch (e) {
+      const name = e instanceof Error ? e.name : "";
+      if (name === "PasswordException") throw new Error("パスワード付きの PDF は開けません");
+      throw new Error(`PDF ファイルを解析できません（${e instanceof Error ? e.message : e}）`);
+    }
+    return {
+      kind,
+      html: converted.html,
+      warnings: converted.warnings,
+      pageCount: converted.pageCount,
+      urls: converted.urls,
       sha256: await sha256Hex(converted.text),
     };
   }

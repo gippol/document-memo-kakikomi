@@ -6,6 +6,10 @@ const ctx: PlaceContext = {
     { no: 1, id: 256, title: "表紙", start: 0 },
     { no: 2, id: 300, title: "体制", start: 40 },
   ],
+  pages: [
+    { no: 1, start: 0 },
+    { no: 2, start: 50 },
+  ],
   headings: [
     { text: "1. 背景", level: 1, start: 10 },
     { text: "2. 予算", level: 1, start: 80 },
@@ -26,6 +30,14 @@ describe("全体メモの付け先", () => {
     expect(r).toMatchObject({ found: true, place: { slide: 2, heading: "体制" }, target: { kind: "point", start: 40 } });
     expect(r.sortKey).toBeLessThan(40);
     expect(resolvePlace({ ...a, slideId: 999 }, ctx).found).toBe(false);
+  });
+
+  it("PDF のページは番号で探す", () => {
+    const a = createPlaceAnchor({ scope: "page", page: 2 }, "x");
+    expect(a).toMatchObject({ scope: "page", page: 2, quote: "p.2" });
+    expect(resolvePlace(a, ctx)).toMatchObject({ found: true, place: { page: 2 }, target: { kind: "point", start: 50 }, sortKey: 49.5 });
+    expect(resolvePlace(createPlaceAnchor({ scope: "page", page: 9 }, "x"), ctx).found).toBe(false);
+    expect(placeLabel({ scope: "page", page: 2 })).toBe("ページ 2");
   });
 
   it("シートは名前、見出しは文言で探す", () => {

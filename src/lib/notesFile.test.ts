@@ -49,6 +49,15 @@ describe("全体メモ", () => {
     expect(Object.keys(JSON.parse(out).notes[0].anchor)).toEqual(["type", "scope", "slide", "slideId", "heading", "quote", "sourceSha256"]);
   });
 
+  it("PDF のページの全体メモと、ページ番号の付いた文言のノートも保たれる", () => {
+    const pageNote = place({ type: "place", scope: "page", page: 3, quote: "p.3" });
+    const textNote = { ...base, anchor: { type: "text", quote: "あ", prefix: "", suffix: "", start: 0, end: 1, page: 2, sourceSha256: "x" } };
+    const out = serializeNotesFile(parseNotesFile(json([pageNote, textNote]), "a.pdf"));
+    const f = parseNotesFile(out, "a.pdf");
+    expect(f.notes.map((n) => n.anchor)).toEqual([pageNote.anchor, textNote.anchor]);
+    expect(Object.keys(JSON.parse(out).notes[0].anchor)).toEqual(["type", "scope", "page", "quote", "sourceSha256"]);
+  });
+
   it("付け先に必要な項目が無ければ読めないノートとして残す", () => {
     const f = parseNotesFile(
       json([

@@ -3,10 +3,10 @@
  * 会議の脱線や資料にない口頭の補足を、資料のどのあたりの話かだけ残す。
  */
 
-/** doc: 資料全体 / slide: PowerPoint のスライド / sheet: Excel のシート / heading: Word・Markdown の見出しの節 */
-export type PlaceScope = "doc" | "slide" | "sheet" | "heading";
+/** doc: 資料全体 / slide: PowerPoint のスライド / page: PDF のページ / sheet: Excel のシート / heading: Word・Markdown の見出しの節 */
+export type PlaceScope = "doc" | "slide" | "page" | "sheet" | "heading";
 
-export const PLACE_SCOPES: PlaceScope[] = ["doc", "slide", "sheet", "heading"];
+export const PLACE_SCOPES: PlaceScope[] = ["doc", "slide", "page", "sheet", "heading"];
 
 export interface PlaceAnchor {
   type: "place";
@@ -14,6 +14,8 @@ export interface PlaceAnchor {
   /** slide: スライド番号（表示用）と スライド ID（並べ替えても変わらない。位置の特定に使う） */
   slide?: number;
   slideId?: number;
+  /** page: PDF のページ番号 */
+  page?: number;
   /** sheet: シート名 */
   sheet?: string;
   /** heading: 見出しの文言（位置の特定に使う）。slide ではスライドのタイトル */
@@ -29,6 +31,7 @@ export interface PlaceOption {
   scope: PlaceScope;
   slide?: number;
   slideId?: number;
+  page?: number;
   sheet?: string;
   heading?: string;
 }
@@ -43,6 +46,8 @@ export interface HeadingSpan {
 /** 位置を特定するときの、今の資料の構造 */
 export interface PlaceContext {
   slides: { no: number; id: number; title: string; start: number }[];
+  /** PDF のページ */
+  pages: { no: number; start: number }[];
   headings: HeadingSpan[];
   /** Excel のシート名（並び順） */
   sheets: string[];
@@ -54,6 +59,8 @@ export function placeLabel(p: PlaceOption): string {
       return "資料全体";
     case "slide":
       return `スライド ${p.slide ?? "?"}${p.heading ? ` ${p.heading}` : ""}`;
+    case "page":
+      return `ページ ${p.page ?? "?"}`;
     case "sheet":
       return `シート ${p.sheet ?? ""}`;
     case "heading":
@@ -64,6 +71,7 @@ export function placeLabel(p: PlaceOption): string {
 export function createPlaceAnchor(p: PlaceOption, sourceSha256: string): PlaceAnchor {
   const a: PlaceAnchor = { type: "place", scope: p.scope, quote: "", sourceSha256 };
   if (p.scope === "slide") Object.assign(a, { slide: p.slide, slideId: p.slideId, heading: p.heading, quote: p.heading ?? "" });
+  if (p.scope === "page") Object.assign(a, { page: p.page, quote: `p.${p.page ?? "?"}` });
   if (p.scope === "sheet") Object.assign(a, { sheet: p.sheet, quote: p.sheet ?? "" });
   if (p.scope === "heading") Object.assign(a, { heading: p.heading, quote: p.heading ?? "" });
   return a;
@@ -97,6 +105,11 @@ export function resolvePlace(a: PlaceAnchor, ctx: PlaceContext): ResolvedPlace {
         sortKey: s.start - 0.5,
       };
     }
+    case "page": {
+      const p = ctx.pages.find((x) => x.no === a.page);
+      if (!p) return lost;
+      return { found: true, place: a, target: { kind: "point", start: p.start }, sortKey: p.start - 0.5 };
+    }
     case "sheet": {
       const idx = ctx.sheets.indexOf(a.sheet ?? "");
       if (idx < 0) return lost;
@@ -110,7 +123,7 @@ export function resolvePlace(a: PlaceAnchor, ctx: PlaceContext): ResolvedPlace {
   }
 }
 
-/** 全体メモの付け先の選択肢。資料全体と、いま見ている場所（スライド・シート・見出しの節。分からなければ無し） */
+/** 全体メモの付け先の選択肢。資料全体と、いま見ている場所（スライド・ページ・シート・見出しの節。分からなければ無し） */
 export function placeOptions(here: PlaceOption | null): PlaceOption[] {
   return here && here.scope !== "doc" ? [{ scope: "doc" }, here] : [{ scope: "doc" }];
 }
