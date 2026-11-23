@@ -28,7 +28,7 @@ export function BoardFooter({ hint, disabled, markdown }: { hint: string; disabl
 
 /**
  * 一覧の 1 行（押すと該当箇所へ移動。資料が見つからなければ押せない）。
- * disabled で理由を渡すと押せない行にする。extra は行の下に添える内容
+ * disabled で理由を渡すと押せない行にする。action は行の右に置くボタン、extra は行の下に添える内容
  */
 export function BoardRow({
   item,
@@ -36,6 +36,7 @@ export function BoardRow({
   children,
   title,
   disabled,
+  action,
   extra,
 }: {
   item: FolderNote;
@@ -43,21 +44,25 @@ export function BoardRow({
   children: ReactNode;
   title?: string;
   disabled?: string;
+  action?: ReactNode;
   extra?: ReactNode;
 }) {
   return (
     <li>
-      <button
-        onClick={() => onJump(item)}
-        disabled={!item.docExists || !!disabled}
-        title={
-          disabled ??
-          (item.docExists ? (title ?? `${item.docPath} の該当箇所へ移動`) : "資料が見つかりません（ファイル一覧の「孤立したノート」から付け替えられます）")
-        }
-        className={`flex w-full items-baseline gap-x-[1ch] px-1 text-left hover:bg-hl disabled:cursor-default disabled:hover:bg-transparent ${disabled ? "opacity-50" : ""}`}
-      >
-        {children}
-      </button>
+      <div className="flex items-baseline">
+        <button
+          onClick={() => onJump(item)}
+          disabled={!item.docExists || !!disabled}
+          title={
+            disabled ??
+            (item.docExists ? (title ?? `${item.docPath} の該当箇所へ移動`) : "資料が見つかりません（ファイル一覧の「孤立したノート」から付け替えられます）")
+          }
+          className={`flex min-w-0 flex-1 items-baseline gap-x-[1ch] px-1 text-left hover:bg-hl disabled:cursor-default disabled:hover:bg-transparent ${disabled ? "opacity-50" : ""}`}
+        >
+          {children}
+        </button>
+        {action}
+      </div>
       {extra}
     </li>
   );

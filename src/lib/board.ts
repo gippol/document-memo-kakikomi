@@ -247,3 +247,69 @@ export function boardMarkdown(groups: BoardGroup[], summary: BoardSummary, today
   }
   return out.join("\n") + "\n";
 }
+
+// ---------- 種類での絞り込み（先生に聞くリスト = 質問だけ） ----------
+
+export type BoardKind = "all" | "action" | "question";
+
+export function filterKind(items: BoardItem[], kind: BoardKind): BoardItem[] {
+  return kind === "all" ? items : items.filter((i) => i.kind === kind);
+}
+
+/** Markdown の見出し */
+export const BOARD_TITLE: Record<BoardKind, string> = {
+  all: "未完了の宿題・質問",
+  action: "未完了の宿題",
+  question: "未回答の質問",
+};
+
+// ---------- 完了・回答済みにする ----------
+
+/**
+ * ノートファイルの中の宿題・質問を完了（質問は回答済み）にする / 戻す。
+ * 宿題・質問でないノート・見つからないノートはそのまま（found: false）
+ */
+export function setNoteDone(file: NotesFile, id: string, done: boolean, now: string): { file: NotesFile; found: boolean } {
+  let found = false;
+  const notes = file.notes.map((n) => {
+    if (n.id !== id || (n.kind !== "action" && n.kind !== "question")) return n;
+    found = true;
+    if (!!n.done === done) return n;
+    return { ...n, done: done || undefined, updatedAt: now };
+  });
+  return { file: found ? { ...file, notes } : file, found };
+}
+
+// ---------- 期限前の通知 ----------
+
+export interface DueAlert {
+  overdue: number;
+  today: number;
+  tomorrow: number;
+}
+
+/** 期限切れ・今日が期限・明日が期限の、未完了の宿題・未回答の質問の数 */
+export function dueAlert(items: BoardItem[], today: Date): DueAlert {
+  const t = formatDate(today);
+  const next = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+  const tm = formatDate(next);
+  const a: DueAlert = { overdue: 0, today: 0, tomorrow: 0 };
+  for (const i of items) {
+    const due = i.note.due;
+    if (!due) continue;
+    if (due < t) a.overdue++;
+    else if (due === t) a.today++;
+    else if (due === tm) a.tomorrow++;
+  }
+  return a;
+}
+
+/** 通知の文（何も無ければ null） */
+export function dueAlertMessage(a: DueAlert): string | null {
+  const parts = [
+    a.overdue > 0 && `期限切れ ${a.overdue}件`,
+    a.today > 0 && `今日が期限 ${a.today}件`,
+    a.tomorrow > 0 && `明日が期限 ${a.tomorrow}件`,
+  ].filter(Boolean);
+  return parts.length > 0 ? `${parts.join("・")}の宿題・質問があります` : null;
+}

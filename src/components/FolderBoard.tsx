@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { BoardData, FolderNote } from "../lib/board";
+import type { BoardData, BoardItem, FolderNote } from "../lib/board";
 import type { LedgerData } from "../lib/ledger";
 import { DecisionLedger } from "./DecisionLedger";
 import { TaskBoard } from "./TaskBoard";
@@ -24,6 +24,8 @@ interface Props {
   decisions: LedgerData | null;
   error: string | null;
   onJump(item: FolderNote): void;
+  /** 宿題を完了・質問を回答済みにする（done: false で戻す）。失敗したらエラーの文を返す */
+  onSetDone(item: BoardItem, done: boolean): Promise<string | null>;
   onClose(): void;
   /** 指定すると、決定事項の台帳から置き換え元を選ぶ画面にする */
   pick?: PickSupersede;
@@ -34,7 +36,7 @@ interface Props {
  * 「宿題・質問」（未完了の宿題・未回答の質問のボード）と「決定事項」（決定事項の台帳）を切り替える。
  * 項目を押すとその資料の該当箇所へ移動する。
  */
-export function FolderBoard({ tab: shownTab, onTab, board, decisions, error, onJump, onClose, pick }: Props) {
+export function FolderBoard({ tab: shownTab, onTab, board, decisions, error, onJump, onSetDone, onClose, pick }: Props) {
   const tab = pick ? "decisions" : shownTab;
   // 日付が変わっても開いている間は同じ日で数える
   const [today] = useState(() => new Date());
@@ -95,7 +97,7 @@ export function FolderBoard({ tab: shownTab, onTab, board, decisions, error, onJ
         )}
 
         {tab === "tasks" ? (
-          <TaskBoard data={board} today={today} onJump={onJump} />
+          <TaskBoard data={board} today={today} onJump={onJump} onSetDone={onSetDone} />
         ) : (
           <DecisionLedger data={decisions} today={today} onJump={onJump} pick={pick} />
         )}

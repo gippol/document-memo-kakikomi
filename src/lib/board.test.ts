@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   boardMarkdown,
   collectBoard,
+  dueAlert,
+  dueAlertMessage,
+  filterKind,
+  setNoteDone,
   endOfWeek,
   filterBoard,
   groupBoard,
@@ -159,5 +163,50 @@ describe("boardMarkdown", () => {
 
   it("空のとき", () => {
     expect(boardMarkdown([], summarizeBoard([], TODAY), TODAY)).toContain("（未完了の宿題・質問はありません）");
+  });
+});
+
+describe("種類での絞り込み・完了にする", () => {
+  it("宿題だけ・質問だけに絞る", () => {
+    const items = [item({ comment: "宿題" }), item({ kind: "question", comment: "質問" })];
+    expect(filterKind(items, "question").map((i) => i.note.comment)).toEqual(["質問"]);
+    expect(filterKind(items, "action").map((i) => i.note.comment)).toEqual(["宿題"]);
+    expect(filterKind(items, "all")).toHaveLength(2);
+  });
+
+  it("宿題・質問を完了（回答済み）にし、戻せる。ほかのノートは変えない", () => {
+    const q = note({ kind: "question", comment: "質問" });
+    const m = note({ comment: "メモ" });
+    const f = { ...emptyNotesFile("a.md"), notes: [q, m] };
+    const done = setNoteDone(f, q.id, true, "2026-11-23T10:00:00.000Z");
+    expect(done.found).toBe(true);
+    expect(done.file.notes[0]).toMatchObject({ done: true, updatedAt: "2026-11-23T10:00:00.000Z" });
+    expect(done.file.notes[1]).toBe(m);
+    const undone = setNoteDone(done.file, q.id, false, "2026-11-23T11:00:00.000Z");
+    expect(undone.file.notes[0].done).toBeUndefined();
+    expect(setNoteDone(f, m.id, true, "x")).toEqual({ file: f, found: false });
+    expect(setNoteDone(f, "none", true, "x").found).toBe(false);
+  });
+});
+
+describe("期限前の通知", () => {
+  it("期限切れ・今日・明日を数える", () => {
+    const items = [
+      item({ due: "2026-11-20" }),
+      item({ kind: "question", due: "2026-11-22" }),
+      item({ due: "2026-11-23" }),
+      item({ due: "2026-11-24" }),
+      item({ due: "2026-11-25" }),
+      item({}),
+    ];
+    const a = dueAlert(items, TODAY);
+    expect(a).toEqual({ overdue: 2, today: 1, tomorrow: 1 });
+    expect(dueAlertMessage(a)).toBe("期限切れ 2件・今日が期限 1件・明日が期限 1件の宿題・質問があります");
+    expect(dueAlertMessage({ overdue: 0, today: 0, tomorrow: 2 })).toBe("明日が期限 2件の宿題・質問があります");
+    expect(dueAlertMessage({ overdue: 0, today: 0, tomorrow: 0 })).toBeNull();
+  });
+
+  it("月末・年末の明日", () => {
+    expect(dueAlert([item({ due: "2027-01-01" })], new Date(2026, 11, 31)).tomorrow).toBe(1);
   });
 });
