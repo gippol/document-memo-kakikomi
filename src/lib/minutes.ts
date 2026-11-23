@@ -17,13 +17,13 @@ const WHOLE_DOC = "（資料全体）";
 const LOST = "（資料に見つからないノート）";
 
 /** 引用を 1 行・最大 QUOTE_MAX 文字にする */
-function oneLine(text: string, max = QUOTE_MAX): string {
+export function oneLine(text: string, max = QUOTE_MAX): string {
   const s = text.replace(/\s+/g, " ").trim();
   return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
 /** 複数行のコメントを箇条書きの続きとして字下げする */
-function indentRest(text: string, indent: string): string {
+export function indentRest(text: string, indent: string): string {
   return text
     .trim()
     .split(/\r?\n/)

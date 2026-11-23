@@ -78,6 +78,9 @@ export function useWorkspace({ onBeforeOpen }: Options) {
       onBeforeOpenRef.current();
       try {
         const content = await loadDocument(r, path, docOptions());
+        // 前の資料の表示テキストで新しい資料のアンカーを解決しないよう、描画し終えるまで空にする
+        // （Viewer は資料ごとに作り直すので、描画し終えると必ず onTextReady が呼ばれる）
+        if (pathRef.current !== path) setDocText(null);
         pathRef.current = path;
         setCurrentPath(path);
         setDoc(content);
