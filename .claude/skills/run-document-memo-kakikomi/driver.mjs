@@ -110,6 +110,23 @@ async function waitReady(timeoutSec) {
   throw new Error(`${timeoutSec} 秒待ってもアプリが起動しません。ログ: ${LOG}`);
 }
 
+/**
+ * アプリが開いてよいフォルダの一覧（利用者がフォルダ選択ダイアログで選んだもの）に folder を足す。
+ * open_folder は一覧に無いフォルダを開かないので、デモフォルダはここで足しておく
+ */
+function allowFolder(folder) {
+  const file = join(process.env.APPDATA, "com.shiryomemo.app", "allowed-folders.json");
+  let list = [];
+  try {
+    list = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    /* 無い・壊れているときは作り直す */
+  }
+  if (Array.isArray(list) && list.includes(folder)) return;
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify([folder, ...(Array.isArray(list) ? list : [])], null, 2));
+}
+
 const commands = {
   /** npm run tauri dev を CDP 付きでバックグラウンド起動し、画面が出るまで待つ */
   async launch(timeoutSec = "600") {
@@ -150,6 +167,7 @@ const commands = {
    */
   async demo(doc = "定例会議資料.docx") {
     if (!existsSync(DEMO)) cpSync(join(UNIT, "samples"), DEMO, { recursive: true });
+    allowFolder(DEMO);
     if (!existsSync(LS_BACKUP)) {
       const backup = await evaluate(`JSON.stringify(Object.fromEntries(Object.keys(localStorage).map(k => [k, localStorage.getItem(k)])))`);
       writeFileSync(LS_BACKUP, backup);

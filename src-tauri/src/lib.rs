@@ -494,12 +494,77 @@ async fn save_minutes(
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
+/// 利用者がフォルダ選択ダイアログで選んだフォルダの一覧（新しい順）を置くファイル。
+/// アプリの設定フォルダ（Windows では `%APPDATA%\<identifier>`）に置く。
+/// `open_folder` はここにあるフォルダしか開かない（WebView 側のコードが任意のフォルダを開けないようにする）。
+const ALLOWED_FOLDERS_FILE: &str = "allowed-folders.json";
+const ALLOWED_FOLDERS_MAX: usize = 20;
+
+fn allowed_folders_path(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_config_dir()
+        .map(|d| d.join(ALLOWED_FOLDERS_FILE))
+        .map_err(|e| format!("設定フォルダが見つかりません: {e}"))
+}
+
+/// 一覧を読む。無い・壊れている場合は空として扱う（フォルダを選び直せば作り直される）。
+fn read_allowed_folders(path: &Path) -> Vec<String> {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
+        .unwrap_or_default()
+}
+
+/// root を一覧の先頭に入れ、古いものは ALLOWED_FOLDERS_MAX 件を超えた分だけ捨てる。
+fn remember_folder(list: Vec<String>, root: &str) -> Vec<String> {
+    std::iter::once(root.to_string())
+        .chain(list.into_iter().filter(|r| r != root))
+        .take(ALLOWED_FOLDERS_MAX)
+        .collect()
+}
+
+fn write_allowed_folders(path: &Path, list: &[String]) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| format!("設定を保存できません: {e}"))?;
+    }
+    let json = serde_json::to_string_pretty(list).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| format!("設定を保存できません: {e}"))
+}
+
+/// フォルダ選択ダイアログを出し、選ばれたフォルダを「開いてよいフォルダ」として覚える。
+/// 選んだフォルダのパスを返す（キャンセルしたら None）。開くのは続けて `open_folder` で行う。
+/// 選択ダイアログは WebView に許可せず、ここで出したダイアログの結果だけを使う。
+#[tauri::command]
+async fn pick_folder(app: AppHandle, window: tauri::Window) -> Result<Option<String>, String> {
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .set_title("資料フォルダを開く")
+        .blocking_pick_folder()
+    else {
+        return Ok(None);
+    };
+    let root = picked
+        .into_path()
+        .map_err(|e| format!("フォルダを扱えません: {e}"))?
+        .to_string_lossy()
+        .into_owned();
+    let path = allowed_folders_path(&app)?;
+    write_allowed_folders(&path, &remember_folder(read_allowed_folders(&path), &root))?;
+    Ok(Some(root))
+}
+
 /// 資料フォルダを開く。以降のコマンドはこのフォルダに対してのみ動く。
+/// - 開けるのは `pick_folder` で利用者が選んだことのあるフォルダだけ
 /// - フォルダを監視し、変更されたファイルの相対パスを `fs-changed` イベントで通知する
 /// - 資料内の相対画像を表示できるよう asset プロトコルでこのフォルダを公開する
 ///   （tauri.conf.json の scope は空。開いていないフォルダのファイルは表示できない）
 #[tauri::command]
 fn open_folder(app: AppHandle, state: State<FolderState>, root: String) -> Result<(), String> {
+    if !read_allowed_folders(&allowed_folders_path(&app)?).contains(&root) {
+        return Err(format!("「資料フォルダを開く」からもう一度選んでください: {root}"));
+    }
     let root_path = PathBuf::from(&root);
     if !root_path.is_absolute() || !root_path.is_dir() {
         return Err(format!("フォルダが見つかりません: {root}"));
@@ -557,6 +622,7 @@ pub fn run() {
             write_notes_backup,
             delete_orphan_notes,
             save_minutes,
+            pick_folder,
             open_folder
         ])
         .run(tauri::generate_context!())
@@ -572,6 +638,29 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(d.join("sub")).unwrap();
         d
+    }
+
+    #[test]
+    fn remember_folder_puts_latest_first_without_duplicates() {
+        let list = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(remember_folder(list.clone(), "b"), vec!["b", "a"]);
+        assert_eq!(remember_folder(list, "c"), vec!["c", "a", "b"]);
+        let many: Vec<String> = (0..ALLOWED_FOLDERS_MAX).map(|i| i.to_string()).collect();
+        let r = remember_folder(many, "new");
+        assert_eq!(r.len(), ALLOWED_FOLDERS_MAX);
+        assert_eq!(r[0], "new");
+        assert!(!r.contains(&(ALLOWED_FOLDERS_MAX - 1).to_string()));
+    }
+
+    #[test]
+    fn allowed_folders_round_trip_and_tolerate_broken_file() {
+        let dir = temp_dir("allowed");
+        let path = dir.join("cfg").join(ALLOWED_FOLDERS_FILE);
+        assert!(read_allowed_folders(&path).is_empty());
+        write_allowed_folders(&path, &["C:\\資料".to_string()]).unwrap();
+        assert_eq!(read_allowed_folders(&path), vec!["C:\\資料"]);
+        fs::write(&path, "{ broken").unwrap();
+        assert!(read_allowed_folders(&path).is_empty());
     }
 
     #[test]
