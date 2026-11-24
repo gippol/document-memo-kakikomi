@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
 import type { NotesFileEntry } from "./board";
 
 export interface DocEntry {
@@ -37,10 +36,11 @@ export function errMsg(e: unknown): string {
 export const NOTES_CONFLICT = "NOTES_CONFLICT";
 
 export const api = {
-  pickFolder: async (): Promise<string | null> => {
-    const r = await open({ directory: true, multiple: false, title: "資料フォルダを開く" });
-    return typeof r === "string" ? r : null;
-  },
+  /**
+   * フォルダ選択ダイアログ（Rust 側で出す）で資料フォルダを選ぶ。選んだフォルダは
+   * open_folder で開けるようになる（選んだことのないフォルダは開けない）。キャンセルしたら null
+   */
+  pickFolder: () => invoke<string | null>("pick_folder"),
   listDocuments: (root: string) => invoke<DocList>("list_documents", { root }),
   /** フォルダ内のすべてのノートファイル（宿題・質問ボード用。中身の検証は parseNotesFile で行う） */
   listAllNotes: (root: string) => invoke<NotesFileEntry[]>("list_all_notes", { root }),
