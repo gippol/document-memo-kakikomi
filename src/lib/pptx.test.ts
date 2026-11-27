@@ -104,13 +104,10 @@ describe("pptxToHtml", () => {
     const s1 = body.querySelector('section[data-slide="1"]')!;
     expect(s1.getAttribute("data-slide-id")).toBe("256");
     expect(s1.getAttribute("data-title")).toBe("今期の課題");
-    expect([...s1.children].map((c) => c.tagName.toLowerCase() + (c.className ? "." + c.className : ""))).toEqual([
-      "h2",
-      "ul",
-      "table",
-      "div.slide-img",
-      "aside.slide-notes",
-    ]);
+    // 読む順（DOM の順）: 位置の箱の中身を順に見る。発表者ノートはスライドの外
+    const canvas = s1.querySelector(".slide-canvas")!;
+    expect([...canvas.children].map((c) => c.querySelector("h2,ul,table,.slide-img")?.tagName.toLowerCase())).toEqual(["h2", "ul", "table", "div"]);
+    expect([...s1.children].map((c) => c.className)).toEqual(["slide-canvas", "slide-notes"]);
     expect(s1.querySelector("ul > li > ul > li")?.textContent).toBe("エンジニア 2 名");
     expect(s1.querySelector(".slide-img")?.getAttribute("data-label")).toBe("画像: 売上の推移");
     expect(s1.querySelector(".slide-notes")?.textContent).toBe("ここは口頭で補足する");

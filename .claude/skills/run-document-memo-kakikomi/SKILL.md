@@ -97,6 +97,7 @@ node $D stop      # アプリ・vite・tauri CLI を止める
 | `click "決定事項" "[role=dialog]"` → `type <語>` → `click "[決定]<内容の先頭>" "[role=dialog]"` | 決定事項の台帳に切り替え、検索して移動（検索欄は開くとフォーカスされる。最後に開いたタブを覚えている） |
 | `card <コメント> "削除"` → `card <コメント> "y"` | ノートを削除（確認の y/n がある）。戻すのは `key z ctrl` か `click "元に戻す" aside` |
 | `click "2. 検討事項" nav` / `click "«" nav` / `click "目次 »"` | Word・Markdown の左の見出しの目次で移動 / 目次を閉じる / 開く |
+| `click "図" nav` / `click "文字" nav` | PowerPoint の表示を切り替える（図: スライドの見た目どおり / 文字: 文字のカード）。デモフォルダに `システム構成図.pptx` が無ければ `samples/` からコピーする |
 | `where` | 作業フォルダ・ログ・デモフォルダの場所 |
 
 ## Run (human path)
@@ -108,7 +109,7 @@ npm run tauri dev   # → ウィンドウが開く。前回開いたフォルダ
 ## Test
 
 ```bash
-npm test                       # vitest（160 件）
+npm test                       # vitest（181 件）
 npx tsc --noEmit -p .
 npm run build
 (cd src-tauri && cargo test)   # 15 件

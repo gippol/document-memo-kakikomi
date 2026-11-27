@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errMsg, NOTES_CONFLICT, type DocEntry, type OrphanNotes } from "../lib/api";
 import { CONFIG_FILE, DEFAULT_CONFIG, parseConfig, type FolderConfig } from "../lib/config";
-import { loadDocument, type LoadedDoc } from "../lib/document";
+import { disposeDoc, loadDocument, type LoadedDoc } from "../lib/document";
 import type { PageSpan, SlideSpan } from "../lib/dom";
-import type { PageImages } from "../lib/pdf";
 import type { HeadingSpan } from "../lib/place";
 import { mergeNotesFiles, NOTES_SUFFIX, parseNotesFile, serializeNotesFile } from "../lib/notesFile";
 import { LS_KEYS, lsGet, lsSet } from "../lib/storage";
@@ -207,14 +206,13 @@ export function useWorkspace({ onBeforeOpen }: Options) {
 
   // ---------- 外部での変更検知 ----------
 
-  // PDF のページ画像（blob URL）と pdf.js の文書は、表示しなくなったら解放する
+  // PDF のページ画像（blob URL）と pdf.js の文書、PowerPoint の画像（blob URL）は、表示しなくなったら解放する
   // （StrictMode で effect が 2 回走っても、表示中のものは解放しない）
-  const shownPdf = useRef<PageImages | null>(null);
+  const shownDoc = useRef<LoadedDoc | null>(null);
   useEffect(() => {
-    const prev = shownPdf.current;
-    const cur = doc?.kind === "pdf" ? doc.images : null;
-    shownPdf.current = cur;
-    if (prev && prev !== cur) prev.dispose();
+    const prev = shownDoc.current;
+    shownDoc.current = doc;
+    if (prev && prev !== doc) disposeDoc(prev);
   }, [doc]);
 
   const handleFsChange = useRef<(paths: string[]) => void>(() => {});
@@ -236,16 +234,25 @@ export function useWorkspace({ onBeforeOpen }: Options) {
         .then(() => loadDocument(r, cur, docOptions()))
         .then((c) => {
           if (pathRef.current !== cur) {
-            if (c.kind === "pdf") c.images.dispose();
+            disposeDoc(c);
             return;
           }
           // 表示内容が同じなら再描画しない（Word は見出し設定の変更でハッシュは同じでも HTML が変わる）
           // PDF は文字が同じでも図が変わることがあるので、バイト列から作ったキャッシュのキーも比べる
+          // PowerPoint の HTML は画像の blob URL が読み込むたびに変わるので、画像の名前に置き換えたもので比べる
           const view = (d: LoadedDoc) =>
-            d.kind === "markdown" ? d.content : d.kind === "xlsx" ? d.sha256 : d.kind === "pdf" ? `${d.cacheKey}\n${d.html}` : d.html;
+            d.kind === "markdown"
+              ? d.content
+              : d.kind === "xlsx"
+                ? d.sha256
+                : d.kind === "pdf"
+                  ? `${d.cacheKey}\n${d.html}`
+                  : d.kind === "pptx"
+                    ? d.viewKey
+                    : d.html;
           setDoc((prev) => {
             if (prev && prev.sha256 === c.sha256 && view(prev) === view(c)) {
-              if (c.kind === "pdf") c.images.dispose();
+              disposeDoc(c);
               return prev;
             }
             return c;

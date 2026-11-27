@@ -236,14 +236,12 @@ body {
   max-width: 100%;
 }
 
-/* ---------- PowerPoint（スライドのカード） ---------- */
+/* ---------- PowerPoint ---------- */
 /* 番号・目印・ラベルは ::before で出す。DOM の文字ではないのでアンカーのテキストに混ざらない */
+/* 同じ HTML を 2 通りに表示する（src/lib/pptx.ts）。.pptx-cards は文字のカード、.pptx-layout は図（位置・書式どおり） */
 .doc-pptx .slide {
   position: relative;
   margin: 0 0 28px;
-  padding: 28px 32px 20px;
-  border: 1px solid var(--color-rule);
-  background: #fff;
 }
 .doc-pptx .slide::before {
   content: "スライド " attr(data-slide);
@@ -253,21 +251,11 @@ body {
   color: var(--color-ink-dim);
   font-size: 11px;
 }
-.doc-pptx .slide[data-hidden] {
-  border-style: dashed;
-  background: transparent;
-}
 .doc-pptx .slide[data-hidden]::before {
   content: "スライド " attr(data-slide) "（非表示）";
 }
-.doc-pptx .slide > h2:first-of-type {
-  margin-top: 0;
-}
 .doc-pptx td > p {
   margin: 0;
-}
-.doc-pptx .slide-img {
-  margin: 0.6em 0;
 }
 .doc-pptx .slide-img::before {
   content: "[" attr(data-label) "]";
@@ -291,6 +279,297 @@ body {
 }
 .doc-pptx .slide-notes p {
   margin: 0.3em 0;
+}
+
+/* --- 文字のカード --- */
+.pptx-cards .slide {
+  padding: 28px 32px 20px;
+  border: 1px solid var(--color-rule);
+  background: #fff;
+}
+.pptx-cards .slide[data-hidden] {
+  border-style: dashed;
+  background: transparent;
+}
+/* 位置の箱は無いものとして、中身を上から流す */
+.pptx-cards :is(.slide-canvas, .sh, .sh-tx, .sh-grp) {
+  display: contents;
+}
+.pptx-cards :is(.sh-deco, .sh-line, .sh-geo, img.pic) {
+  display: none;
+}
+.pptx-cards .slide h2:first-of-type {
+  margin-top: 0;
+}
+.pptx-cards .slide-img {
+  margin: 0.6em 0;
+}
+
+/* --- 図（スライドの見た目どおり） --- */
+.doc-pptx.pptx-layout {
+  max-width: 1100px;
+}
+.pptx-layout .slide {
+  padding-top: 22px;
+}
+.pptx-layout .slide::before {
+  top: 2px;
+  left: 0;
+}
+.pptx-layout .slide-canvas {
+  /* 1pt の長さ。スライドの幅（--sw pt）を表示欄の幅に合わせる（container query の単位） */
+  container-type: inline-size;
+  --pt: calc(100cqw / var(--sw));
+  --fs: 18;
+  --c: #000;
+  --fw: 400;
+  --fst: normal;
+  position: relative;
+  aspect-ratio: var(--sw) / var(--shh);
+  background: var(--bg, #fff);
+  box-shadow: 0 0 0 1px var(--color-rule);
+  color: #000;
+  font-family: "Yu Gothic UI", "Meiryo", "Segoe UI", sans-serif;
+  line-height: 1.2;
+}
+.pptx-layout .slide[data-hidden] .slide-canvas {
+  opacity: 0.55;
+}
+.pptx-layout .sh {
+  position: absolute;
+  left: calc(var(--x) * 1%);
+  top: calc(var(--y) * 1%);
+  width: calc(var(--w) * 1%);
+  height: calc(var(--h) * 1%);
+  z-index: var(--z);
+  rotate: var(--rot, 0deg);
+  box-sizing: border-box;
+  background: var(--fill, none);
+}
+/* 位置の分からない図形（まれ）は流れに沿って置く */
+.pptx-layout .sh[data-nopos] {
+  position: relative;
+  left: auto;
+  top: auto;
+  width: auto;
+  height: auto;
+}
+.pptx-layout .sh[style*="--img"] {
+  background: var(--img) center / 100% 100% no-repeat;
+}
+.pptx-layout .sh[style*="--ln"]:not([data-geo="path"]) {
+  border: max(1px, calc(var(--lw) * var(--pt))) solid var(--ln);
+}
+.pptx-layout .sh[data-dash]:not([data-geo="path"]) {
+  border-style: dashed;
+}
+.pptx-layout .sh[data-geo="roundRect"] {
+  border-radius: calc(var(--rad) * var(--pt));
+}
+.pptx-layout .sh[data-geo="ellipse"] {
+  border-radius: 50%;
+}
+.pptx-layout .sh-geo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.pptx-layout .sh-geo[data-fh] {
+  scale: -1 1;
+}
+.pptx-layout .sh-geo[data-fv] {
+  scale: 1 -1;
+}
+.pptx-layout .sh-geo[data-fh][data-fv] {
+  scale: -1 -1;
+}
+.pptx-layout .sh-geo path {
+  fill: var(--sf, none);
+  stroke: var(--ln, none);
+  stroke-width: max(1px, calc(var(--lw, 0) * var(--pt)));
+  vector-effect: non-scaling-stroke;
+}
+.pptx-layout .sh-geo path[data-dash] {
+  stroke-dasharray: 4 3;
+}
+
+/* 文字の枠 */
+.pptx-layout .sh-tx {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: calc(var(--it) * var(--pt)) calc(var(--ir) * var(--pt)) calc(var(--ib) * var(--pt)) calc(var(--il) * var(--pt));
+  overflow-wrap: anywhere;
+}
+.pptx-layout .sh-tx[data-va="ctr"] {
+  justify-content: center;
+}
+.pptx-layout .sh-tx[data-va="b"] {
+  justify-content: flex-end;
+}
+.pptx-layout .sh-tx[data-nowrap] {
+  white-space: nowrap;
+}
+.pptx-layout .sh-tx[data-vert] {
+  writing-mode: vertical-rl;
+}
+.pptx-layout .slide-canvas :is(p, li, h2, span, td) {
+  font-size: calc(var(--fs) * var(--fsc, 1) * var(--pt));
+  color: var(--c);
+  font-weight: var(--fw);
+  font-style: var(--fst);
+}
+.pptx-layout .slide-canvas :is(p, h2) {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  line-height: 1.2;
+}
+.pptx-layout .slide-canvas li {
+  margin: 0;
+}
+.pptx-layout .slide-canvas :is(ul, ol) {
+  margin: 0;
+  padding-left: 1.1em;
+}
+.pptx-layout .slide-canvas li {
+  line-height: 1.2;
+}
+.pptx-layout .slide-canvas [data-al="ctr"] {
+  text-align: center;
+}
+.pptx-layout .slide-canvas [data-al="r"] {
+  text-align: right;
+}
+.pptx-layout .slide-canvas [data-al="just"] {
+  text-align: justify;
+}
+.pptx-layout .slide-canvas span[data-u] {
+  text-decoration: underline;
+}
+/* マスター・レイアウトの飾りの文字（DOM の文字にしない） */
+.pptx-layout .sh-tx[data-deco]::after {
+  content: attr(data-deco);
+  white-space: pre-wrap;
+  font-size: calc(var(--fs) * var(--pt));
+  color: var(--c);
+  font-weight: var(--fw);
+}
+
+/* 画像（切り抜きは --cl・--ct・--cw・--ch で、はみ出した分を隠す） */
+.pptx-layout .sh-pic {
+  overflow: hidden;
+}
+.pptx-layout .sh-pic .slide-img {
+  display: none;
+}
+.pptx-layout img.pic {
+  position: absolute;
+  left: var(--cl, 0);
+  top: var(--ct, 0);
+  width: var(--cw, 100%);
+  height: var(--ch, 100%);
+  max-width: none;
+}
+/* 表示できない画像・グラフなどは、場所に目印を出す */
+.pptx-layout .sh-pic:not(:has(img)) .slide-img,
+.pptx-layout .sh-media .slide-img,
+.pptx-layout .sh-mark .slide-img {
+  display: flex;
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--color-rule);
+  background: rgba(0, 0, 0, 0.02);
+}
+.pptx-layout .sh-mark .slide-img::before,
+.pptx-layout .sh-pic .slide-img::before {
+  border: none;
+}
+
+/* 表・SmartArt（文字の大きさは書式が無ければ 18pt の既定） */
+.pptx-layout .sh-tbl table {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border-collapse: collapse;
+}
+.pptx-layout .sh-tbl td {
+  padding: calc(3.6 * var(--pt)) calc(7.2 * var(--pt));
+  border: 1px solid #999;
+  background: var(--cf, transparent);
+  line-height: 1.2;
+}
+.pptx-layout .sh-smart {
+  padding: calc(4 * var(--pt));
+  border: 1px dashed var(--color-rule);
+}
+/* 動画・音声は表紙の画像の上に目印を重ねる */
+.pptx-layout .sh-media .slide-img {
+  z-index: 1;
+}
+/* 回転したグループ（中の図形をまとめてグループの中心で回す） */
+.pptx-layout .sh-grp {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z);
+  rotate: var(--rot);
+  transform-origin: calc(var(--ox) * 1%) calc(var(--oy) * 1%);
+  pointer-events: none;
+}
+.pptx-layout .sh-grp > * {
+  pointer-events: auto;
+}
+
+/* 線（折れ点ごとの線分を回して置く。矢印は線の端に三角を重ねる） */
+.pptx-layout .sh-line {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z);
+  pointer-events: none;
+  --t: max(1px, calc(var(--lw) * var(--pt)));
+  --ah: max(6px, calc(var(--lw) * 3 * var(--pt)));
+}
+.pptx-layout .sh-seg {
+  position: absolute;
+  left: calc(var(--x1) * var(--pt));
+  top: calc(var(--y1) * var(--pt) - var(--t) / 2);
+  width: calc(var(--len) * var(--pt));
+  height: var(--t);
+  background: var(--c);
+  transform-origin: 0 50%;
+  rotate: var(--ang);
+}
+.pptx-layout .sh-line[data-dash] .sh-seg {
+  background: repeating-linear-gradient(90deg, var(--c) 0 calc(var(--t) * 4), transparent 0 calc(var(--t) * 7));
+}
+.pptx-layout .sh-seg:is([data-head], [data-tail])::before,
+.pptx-layout .sh-seg:is([data-head], [data-tail])::after {
+  position: absolute;
+  top: 50%;
+  width: var(--ah);
+  height: var(--ah);
+  background: var(--c);
+  translate: 0 -50%;
+}
+.pptx-layout .sh-seg[data-head]::before {
+  content: "";
+  left: 0;
+  clip-path: polygon(100% 0, 0 50%, 100% 100%);
+}
+.pptx-layout .sh-seg[data-tail]::after {
+  content: "";
+  right: 0;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+.pptx-layout .sh-seg[data-head="oval"]::before,
+.pptx-layout .sh-seg[data-tail="oval"]::after {
+  clip-path: circle(40%);
 }
 
 /* ---------- PDF（ページ画像＋透明な文字の層。pdf.js の pdf_viewer.css の textLayer を必要な分だけ移したもの） ---------- */
