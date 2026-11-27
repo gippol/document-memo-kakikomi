@@ -12,8 +12,11 @@ import {
   KIND_LABEL,
   NOTE_KINDS,
   normalizeFields,
+  PRIORITIES,
+  PRIORITY_LABEL,
   type NoteFields,
   type NoteKind,
+  type Priority,
 } from "../lib/noteMeta";
 import { locationLabel } from "../lib/noteViews";
 import type { Note } from "../lib/notesFile";
@@ -40,7 +43,7 @@ export interface NoteView extends AnchorLocation {
   place?: PlaceOption;
 }
 
-export type SortMode = "position" | "timeline";
+export type SortMode = "position" | "timeline" | "priority";
 
 /** 一覧の絞り込み。open: 未完了の宿題・未回答の質問 */
 export type NoteFilter = "all" | "open" | NoteKind;
@@ -101,6 +104,13 @@ export const KIND_STYLE: Record<NoteKind, string> = {
   question: "text-[#b9d7f2]",
 };
 
+/** 優先度の文字色（高は目立たせ、低は控えめに） */
+export const PRIORITY_STYLE: Record<Priority, string> = {
+  high: "text-warn",
+  medium: "text-fg",
+  low: "text-dim",
+};
+
 const FILTERS: [NoteFilter, string][] = [
   ["all", "全部"],
   ["decision", KIND_LABEL.decision],
@@ -117,7 +127,7 @@ function fmt(iso: string) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-const SHORTHAND_HINT = "Ctrl+Enter: 保存 / Esc: キャンセル\n先頭に /決 /宿 /質 /メ で種類、@担当 !12/1 で担当者・期限";
+const SHORTHAND_HINT = "Ctrl+Enter: 保存 / Esc: キャンセル\n先頭に /決 /宿 /質 /メ で種類、@担当 !12/1 /高 で担当者・期限・優先度";
 
 const INPUT = "border border-dim bg-bg px-1 text-bright caret-bright outline-none placeholder:text-dim focus:border-fg";
 
@@ -206,6 +216,19 @@ function NoteEditor(props: {
               className={`[color-scheme:dark] ${INPUT}`}
             />
           </label>
+          <span className="flex items-center gap-1 text-dim">
+            優先度
+            {([undefined, ...PRIORITIES] as const).map((p) => (
+              <button
+                key={p ?? "none"}
+                type="button"
+                onClick={() => set({ priority: p })}
+                className={`btn ${fields.priority === p ? "on" : ""}`}
+              >
+                {p ? PRIORITY_LABEL[p] : "なし"}
+              </button>
+            ))}
+          </span>
         </div>
       )}
       <div className="mt-1 flex justify-end gap-1">
@@ -268,6 +291,7 @@ function TaskLine({ note, kind }: { note: Note; kind: NoteKind }) {
       <span className={note.done ? "text-dim" : overdue ? "text-warn" : "text-bright"}>
         [{note.done ? "x" : " "}] {note.done ? DONE_LABEL[kind] : "未完了"}
       </span>
+      {note.priority && <span className={PRIORITY_STYLE[note.priority]}>優先度:{PRIORITY_LABEL[note.priority]}</span>}
       {note.assignee && <span className="text-fg">@{note.assignee}</span>}
       {note.due && (
         <span className={overdue ? "text-warn" : dueToday ? "text-accent" : "text-fg"}>
@@ -461,6 +485,7 @@ export function NotesPanel(props: Props) {
           [
             ["position", "位置"],
             ["timeline", "新しい順"],
+            ["priority", "優先度"],
           ] as const
         ).map(([m, label]) => (
           <button key={m} onClick={() => props.onSortMode(m)} className={`btn ${props.sortMode === m ? "on" : ""}`}>

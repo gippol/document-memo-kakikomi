@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyShorthand, fieldsPatch, isOverdue, normalizeFields, parseDue, sameFields, type NoteFields } from "./noteMeta";
+import { applyShorthand, fieldsPatch, isOverdue, normalizeFields, parseDue, priorityRank, sameFields, type NoteFields } from "./noteMeta";
 
 const TODAY = new Date(2026, 10, 23); // 2026-11-23
 const memo = (comment: string): NoteFields => ({ kind: "memo", comment });
@@ -60,6 +60,34 @@ describe("applyShorthand", () => {
   it("書かなかった項目は元の値のまま", () => {
     const f: NoteFields = { kind: "action", comment: "!12/5 延期", assignee: "田中", due: "2026-12-01" };
     expect(applyShorthand(f, TODAY)).toEqual({ ...f, comment: "延期", due: "2026-12-05" });
+  });
+});
+
+describe("優先度", () => {
+  it("/高 /中 /低 で優先度を付ける（全角の ／ でもよい）", () => {
+    expect(applyShorthand({ kind: "action", comment: "/高 @田中 見積" }, TODAY)).toEqual({
+      kind: "action",
+      comment: "見積",
+      assignee: "田中",
+      priority: "high",
+    });
+    expect(applyShorthand(memo("／低 あとで"), TODAY)).toMatchObject({ comment: "あとで", priority: "low" });
+  });
+
+  it("優先度だけ書いたメモは宿題とみなす。決定には付けない", () => {
+    expect(applyShorthand(memo("/中 確認"), TODAY)).toMatchObject({ kind: "action", priority: "medium" });
+    expect(normalizeFields({ kind: "decision", comment: "x", priority: "high" })).toEqual({ kind: "decision", comment: "x" });
+    expect(normalizeFields({ kind: "question", comment: "x", priority: "low" })).toEqual({ kind: "question", comment: "x", priority: "low" });
+  });
+
+  it("並べ替えは 高 → 中・なし → 低", () => {
+    expect(priorityRank("high")).toBeLessThan(priorityRank("medium"));
+    expect(priorityRank(undefined)).toBe(priorityRank("medium"));
+    expect(priorityRank("low")).toBeGreaterThan(priorityRank(undefined));
+  });
+
+  it("sameFields は優先度の違いも見る", () => {
+    expect(sameFields({ kind: "action", comment: "x" }, { kind: "action", comment: "x", priority: "high" })).toBe(false);
   });
 });
 

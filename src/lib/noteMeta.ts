@@ -1,5 +1,5 @@
 /**
- * ノートの種類（決定事項・宿題・質問・メモ）と、宿題・質問の担当者・期限・完了状態。
+ * ノートの種類（決定事項・宿題・質問・メモ）と、宿題・質問の担当者・期限・優先度・完了状態。
  * ノートファイルでは任意のフィールドで、無いノートは「メモ」として扱う（古い版のアプリでも読める）。
  */
 
@@ -20,12 +20,30 @@ export const DONE_LABEL: Partial<Record<NoteKind, string>> = {
   question: "回答済み",
 };
 
+/** 宿題・質問の優先度。無いときは「なし」（並べ替えでは中と同じ扱い） */
+export type Priority = "high" | "medium" | "low";
+
+export const PRIORITIES: Priority[] = ["high", "medium", "low"];
+
+export const PRIORITY_LABEL: Record<Priority, string> = { high: "高", medium: "中", low: "低" };
+
+export function isPriority(v: unknown): v is Priority {
+  return typeof v === "string" && (PRIORITIES as string[]).includes(v);
+}
+
+/** 並べ替えの順位（小さいほど先）。高 → 中・なし → 低 */
+export function priorityRank(p: Priority | undefined): number {
+  return p === "high" ? 0 : p === "low" ? 2 : 1;
+}
+
 export interface NoteMeta {
   kind: NoteKind;
   /** 担当者（宿題）・回答する人（質問） */
   assignee?: string;
   /** 期限 YYYY-MM-DD */
   due?: string;
+  /** 優先度（宿題・質問のみ） */
+  priority?: Priority;
   /** 宿題は完了、質問は回答済み */
   done?: boolean;
 }
@@ -52,13 +70,14 @@ export function isDueDate(v: unknown): v is string {
   return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
 }
 
-/** 種類に合わない項目・空の項目を落とす（メモ・決定には担当者・期限・完了状態を持たせない） */
+/** 種類に合わない項目・空の項目を落とす（メモ・決定には担当者・期限・優先度・完了状態を持たせない） */
 export function normalizeFields(f: NoteFields): NoteFields {
   const out: NoteFields = { kind: f.kind, comment: f.comment };
   if (!hasTask(f.kind)) return out;
   const assignee = f.assignee?.trim();
   if (assignee) out.assignee = assignee;
   if (f.due && isDueDate(f.due)) out.due = f.due;
+  if (isPriority(f.priority)) out.priority = f.priority;
   if (f.done) out.done = true;
   return out;
 }
@@ -80,6 +99,12 @@ const KIND_WORDS: Record<string, NoteKind> = {
   質: "question",
   質問: "question",
   q: "question",
+};
+
+const PRIORITY_WORDS: Record<string, Priority> = {
+  高: "high",
+  中: "medium",
+  低: "low",
 };
 
 /** 全角の記号・数字を半角にそろえる */
@@ -136,6 +161,7 @@ export function parseDue(text: string, today: Date): string | null {
  * - `/決` `/宿` `/質` `/メ`（`/決定` `/宿題` `/todo` `/質問` `/q` なども可）: 種類
  * - `@田中`: 担当者
  * - `!12/1`: 期限
+ * - `/高` `/中` `/低`: 優先度
  * 記号は全角でもよい。先頭から空白区切りで続く間だけ読み、記法でない語が出たらそこから後はコメント。
  * 書かれていない項目は元の値（fields）のまま。
  */
@@ -151,6 +177,8 @@ export function applyShorthand(fields: NoteFields, today: Date): NoteFields {
     const body = token.slice(1);
     if (head === "/" && KIND_WORDS[body.toLowerCase()]) {
       out.kind = KIND_WORDS[body.toLowerCase()];
+    } else if (head === "/" && PRIORITY_WORDS[body]) {
+      out.priority = PRIORITY_WORDS[body];
     } else if (head === "@" && body) {
       out.assignee = m[1].slice(1);
     } else if (head === "!" && parseDue(body, today)) {
@@ -162,8 +190,9 @@ export function applyShorthand(fields: NoteFields, today: Date): NoteFields {
     rest = rest.slice(m[0].length);
   }
   if (!found) return fields;
-  // 担当者・期限だけ書いたときは宿題とみなす
-  if (out.kind === "memo" && (out.assignee !== fields.assignee || out.due !== fields.due)) out.kind = "action";
+  // 担当者・期限・優先度だけ書いたときは宿題とみなす
+  const taskSet = out.assignee !== fields.assignee || out.due !== fields.due || out.priority !== fields.priority;
+  if (out.kind === "memo" && taskSet) out.kind = "action";
   out.comment = rest;
   return out;
 }
@@ -186,9 +215,9 @@ export function isOverdue(m: NoteMeta, today: Date): boolean {
   return isOpen(m) && !!m.due && m.due < formatDate(today);
 }
 
-/** ノートの種類・コメント・担当者・期限・完了状態を NoteFields として取り出す */
+/** ノートの種類・コメント・担当者・期限・優先度・完了状態を NoteFields として取り出す */
 export function fieldsOf(n: { comment: string } & Partial<NoteMeta>): NoteFields {
-  return { kind: n.kind ?? "memo", comment: n.comment, assignee: n.assignee, due: n.due, done: n.done };
+  return { kind: n.kind ?? "memo", comment: n.comment, assignee: n.assignee, due: n.due, priority: n.priority, done: n.done };
 }
 
 /** ノートに上書きする値（メモ・空の項目は undefined にしてファイルに書かない） */
@@ -199,6 +228,7 @@ export function fieldsPatch(f: NoteFields) {
     comment: n.comment,
     assignee: n.assignee,
     due: n.due,
+    priority: n.priority,
     done: n.done,
   };
 }
@@ -206,5 +236,5 @@ export function fieldsPatch(f: NoteFields) {
 export function sameFields(a: NoteFields, b: NoteFields): boolean {
   const x = normalizeFields(a);
   const y = normalizeFields(b);
-  return x.kind === y.kind && x.comment === y.comment && x.assignee === y.assignee && x.due === y.due && !!x.done === !!y.done;
+  return x.kind === y.kind && x.comment === y.comment && x.assignee === y.assignee && x.due === y.due && x.priority === y.priority && !!x.done === !!y.done;
 }

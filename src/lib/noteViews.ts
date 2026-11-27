@@ -1,7 +1,7 @@
 import { resolveAnchor, type AnchorLocation } from "./anchor";
 import type { LoadedDoc } from "./document";
 import type { PageSpan, SlideSpan } from "./dom";
-import { isOpen, type NoteKind } from "./noteMeta";
+import { isOpen, priorityRank, type NoteKind } from "./noteMeta";
 import type { Note, NotesFile } from "./notesFile";
 import { resolvePlace, type HeadingSpan } from "./place";
 import { formatRef, headerLabel, headersAt, resolveCellAnchor } from "./sheet";
@@ -78,12 +78,28 @@ export function buildNoteViews(
   });
 }
 
-/** 一覧の並び順。position: 資料上の位置順（見つからないものは末尾）、timeline: 新しい順 */
+/**
+ * 一覧の並び順。
+ * - position: 資料上の位置順（見つからないものは末尾）
+ * - timeline: 新しい順
+ * - priority: 未完了の宿題・質問を優先度（高 → 中・なし → 低）・期限の近い順に先頭へ。残りは位置順
+ */
 export function sortNoteViews(views: NoteView[], mode: SortMode): NoteView[] {
   const arr = [...views];
+  const lost = (v: NoteView) => (v.status === "orphaned" ? 1 : 0);
+  const byPosition = (a: NoteView, b: NoteView) => lost(a) - lost(b) || a.sortKey - b.sortKey;
   if (mode === "position") {
-    const lost = (v: NoteView) => (v.status === "orphaned" ? 1 : 0);
-    arr.sort((a, b) => lost(a) - lost(b) || a.sortKey - b.sortKey);
+    arr.sort(byPosition);
+  } else if (mode === "priority") {
+    const open = (v: NoteView) => (isOpen({ kind: kindOf(v.note), done: v.note.done }) ? 0 : 1);
+    const rank = (v: NoteView) => (open(v) === 0 ? priorityRank(v.note.priority) : 0);
+    arr.sort(
+      (a, b) =>
+        open(a) - open(b) ||
+        rank(a) - rank(b) ||
+        (open(a) === 0 ? (a.note.due ?? "9999").localeCompare(b.note.due ?? "9999") : 0) ||
+        byPosition(a, b),
+    );
   } else {
     arr.sort((a, b) => b.note.createdAt.localeCompare(a.note.createdAt));
   }
