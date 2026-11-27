@@ -8,6 +8,8 @@ export const LS_KEYS = {
   layout: `${PREFIX}layout`,
   /** Word・Markdown の見出しの目次を開いているか（"0" で閉じている） */
   tocOpen: `${PREFIX}tocOpen`,
+  /** PowerPoint の表示（"cards" で文字のカード。既定は図） */
+  pptxView: `${PREFIX}pptxView`,
   paneSize: (layout: string) => `${PREFIX}notesSize:${layout}`,
 };
 

@@ -18,7 +18,17 @@ export type LoadedDoc =
   | { kind: "markdown"; content: string; sha256: string; encoding: string }
   | { kind: "docx"; html: string; sha256: string; warnings: string[]; headingStyles: Record<string, number> }
   | { kind: "xlsx"; book: SheetBook; sha256: string; warnings: string[] }
-  | { kind: "pptx"; html: string; sha256: string; warnings: string[]; slideCount: number }
+  | {
+      kind: "pptx";
+      html: string;
+      sha256: string;
+      warnings: string[];
+      slideCount: number;
+      /** 画像の blob URL（disposeDoc で解放する） */
+      urls: string[];
+      /** 表示内容の比較用（blob URL は読み込むたびに変わるので、画像の名前に置き換えたもの） */
+      viewKey: string;
+    }
   | {
       kind: "pdf";
       html: string;
@@ -32,6 +42,12 @@ export type LoadedDoc =
 
 /** テキストとして表示する資料（Markdown / Word / PowerPoint / PDF） */
 export type TextDoc = Exclude<LoadedDoc, { kind: "xlsx" }>;
+
+/** 表示しなくなった資料の blob URL などを解放する（PDF のページ画像・PowerPoint の画像） */
+export function disposeDoc(d: LoadedDoc): void {
+  if (d.kind === "pdf") d.images.dispose();
+  else if (d.kind === "pptx") for (const u of d.urls) URL.revokeObjectURL(u);
+}
 
 export interface LoadOptions {
   docxHeadings?: HeadingOverrides;
@@ -98,6 +114,8 @@ async function loadOnce(root: string, path: string, opts: LoadOptions): Promise<
       html: converted.html,
       warnings: converted.warnings,
       slideCount: converted.slideCount,
+      urls: converted.urls,
+      viewKey: converted.viewKey,
       sha256: await sha256Hex(converted.text),
     };
   }

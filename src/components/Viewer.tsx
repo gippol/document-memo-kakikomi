@@ -125,6 +125,8 @@ export function Viewer(props: Props) {
   const [toc, setToc] = useState<TocEntry[]>([]);
   const [currentHeading, setCurrentHeading] = useState(0);
   const [tocOpen, setTocOpen] = useState(() => lsGet(LS_KEYS.tocOpen) !== "0");
+  /** PowerPoint の表示: 図（位置・書式どおり）か、文字のカード。同じ HTML を CSS で切り替えるので、アンカーには影響しない */
+  const [pptxView, setPptxView] = useState<"layout" | "cards">(() => (lsGet(LS_KEYS.pptxView) === "cards" ? "cards" : "layout"));
   /**
    * 目次から移動した見出し。利用者が自分でスクロールするまでは、これを「いまの節」にする
    * （資料の末尾の短い節は画面の上 1/3 まで来ないため）
@@ -497,7 +499,7 @@ export function Viewer(props: Props) {
       <div
         key={doc.kind}
         ref={bodyRef}
-        className={`doc doc-${doc.kind}`}
+        className={`doc doc-${doc.kind}${doc.kind === "pptx" ? ` pptx-${pptxView}` : ""}`}
         {...(doc.kind !== "markdown" ? { dangerouslySetInnerHTML: { __html: doc.html } } : {})}
         onClick={(e) => {
           // リンク: 外部 URL はブラウザで開き、文書内リンク（脚注など）はスクロール
@@ -594,7 +596,32 @@ export function Viewer(props: Props) {
   if (doc.kind !== "pptx") return view;
   return (
     <div className="flex h-full">
-      <nav aria-label="スライド一覧" className="w-52 shrink-0 overflow-auto border-r border-line py-1 text-xs">
+      <nav aria-label="スライド一覧" className="w-52 shrink-0 overflow-auto border-r border-line pb-1 text-xs">
+        <div className="sticky top-0 z-10 flex items-center gap-1 bg-bg px-2 py-0.5 text-dim" role="group" aria-label="スライドの表示">
+          <span>表示:</span>
+          {(
+            [
+              ["layout", "図", "スライドの見た目どおりに表示"],
+              ["cards", "文字", "スライドの文字だけを上から並べて表示"],
+            ] as const
+          ).map(([v, label, title]) => (
+            <button
+              key={v}
+              className={`px-1 ${pptxView === v ? "bg-fg text-bg" : "hover:text-fg"}`}
+              title={title}
+              aria-pressed={pptxView === v}
+              onClick={() => {
+                lsSet(LS_KEYS.pptxView, v);
+                // 表示を変えると文字の位置が変わるので、選択と「ノート追加」ボタンを消す
+                window.getSelection()?.removeAllRanges();
+                setFloatPos(null);
+                setPptxView(v);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         {slides.map((s) => (
           <button
             key={s.no}
