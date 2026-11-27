@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { AnchorLocation, AnchorStatus } from "../lib/anchor";
+import { insertTemplate, type NoteTemplate } from "../lib/config";
 import {
   applyShorthand,
   DONE_LABEL,
@@ -60,6 +61,8 @@ interface Props {
   onAddFromSelection(): void;
   onAddPlace(): void;
   canAddPlace: boolean;
+  /** 全体メモに入れられるテンプレート（フォルダの設定ファイルから） */
+  templates: NoteTemplate[];
   onDraftSave(fields: NoteFields, place?: PlaceOption): void;
   onDraftCancel(): void;
   onUpdate(id: string, fields: NoteFields): void;
@@ -111,9 +114,31 @@ const SHORTHAND_HINT = "Ctrl+Enter: 保存 / Esc: キャンセル\n先頭に /�
 
 const INPUT = "border border-dim bg-bg px-1 text-bright caret-bright outline-none placeholder:text-dim focus:border-fg";
 
-function NoteEditor(props: { initial: NoteFields; onSave(v: NoteFields): void; onCancel(): void; saveLabel: string }) {
+function NoteEditor(props: {
+  initial: NoteFields;
+  onSave(v: NoteFields): void;
+  onCancel(): void;
+  saveLabel: string;
+  /** あれば「テンプレート」のボタンを出す（全体メモ） */
+  templates?: NoteTemplate[];
+}) {
   const [fields, setFields] = useState<NoteFields>(props.initial);
   const set = (patch: Partial<NoteFields>) => setFields((f) => ({ ...f, ...patch }));
+  const textRef = useRef<HTMLTextAreaElement>(null);
+  /** テンプレートを入れた後にカーソルを置く位置（描画し直してから置く） */
+  const [cursor, setCursor] = useState<number | null>(null);
+  useEffect(() => {
+    const el = textRef.current;
+    if (cursor === null || !el) return;
+    el.focus();
+    el.setSelectionRange(cursor, cursor);
+    setCursor(null);
+  }, [cursor]);
+  const applyTemplate = (t: NoteTemplate) => {
+    const r = insertTemplate(fields.comment, t.text);
+    set({ comment: r.comment });
+    setCursor(r.cursor);
+  };
   const save = () => props.onSave(normalizeFields(applyShorthand(fields, new Date())));
   // 種類のボタン・担当者・期限の欄にいても Ctrl+Enter / Esc が効くよう、まとめて受ける
   const onKeyDown = (e: KeyboardEvent) => {
@@ -134,11 +159,23 @@ function NoteEditor(props: { initial: NoteFields; onSave(v: NoteFields): void; o
           </button>
         ))}
       </div>
+      {props.templates && props.templates.length > 0 && (
+        <div className="mb-1 flex flex-wrap items-center gap-x-1">
+          <span className="text-dim">テンプレート:</span>
+          {props.templates.map((t, i) => (
+            <button key={i} type="button" onClick={() => applyTemplate(t)} className="btn" title={t.text}>
+              {t.name}
+            </button>
+          ))}
+        </div>
+      )}
       <textarea
+        ref={textRef}
         autoFocus
         value={fields.comment}
         onChange={(e) => set({ comment: e.target.value })}
-        rows={4}
+        // テンプレートなど行の多いコメントも全部見えるよう、行数に合わせて広げる（12 行まで）
+        rows={Math.min(12, Math.max(4, fields.comment.split("\n").length))}
         placeholder={SHORTHAND_HINT}
         className={`w-full resize-y p-1 ${INPUT}`}
       />
@@ -182,7 +219,12 @@ function PlaceLine({ place }: { place: PlaceOption }) {
 }
 
 /** 全体メモの書き始め: 付け先を選んでから書く（既定はいま見ている場所） */
-function PlaceDraft(props: { places: PlaceOption[]; onSave(fields: NoteFields, place: PlaceOption): void; onCancel(): void }) {
+function PlaceDraft(props: {
+  places: PlaceOption[];
+  templates: NoteTemplate[];
+  onSave(fields: NoteFields, place: PlaceOption): void;
+  onCancel(): void;
+}) {
   const [idx, setIdx] = useState(props.places.length - 1);
   return (
     <>
@@ -197,6 +239,7 @@ function PlaceDraft(props: { places: PlaceOption[]; onSave(fields: NoteFields, p
       <NoteEditor
         initial={{ kind: "memo", comment: "" }}
         saveLabel="追加"
+        templates={props.templates}
         onSave={(f) => props.onSave(f, props.places[idx])}
         onCancel={props.onCancel}
       />
@@ -430,7 +473,7 @@ export function NotesPanel(props: Props) {
           <div className="border-b border-line border-l-2 border-l-[#b9d7f2] bg-panel px-2 py-2">
             <div className="text-[#b9d7f2]">{draft.places ? "+ 全体メモ" : "+ new note"}</div>
             {draft.places ? (
-              <PlaceDraft places={draft.places} onSave={props.onDraftSave} onCancel={props.onDraftCancel} />
+              <PlaceDraft places={draft.places} templates={props.templates} onSave={props.onDraftSave} onCancel={props.onDraftCancel} />
             ) : (
               <>
                 <Quote text={draft.quote} />

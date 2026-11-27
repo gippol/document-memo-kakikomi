@@ -40,6 +40,28 @@ npm test              # ユニットテスト
 
 例: `/宿 @田中 !12/1 見積もりを再提出`。先頭から空白区切りで続く間だけ読み、記法でない語が出たらそこから後はすべてコメントです。
 
+### 全体メモのテンプレート
+
+全体メモを書き始めると、入力欄の上に `テンプレート:` のボタンが出ます。押すと「出席者 / 議題 / 次回日程」などの定型文が入り、カーソルは 1 行目の末尾に置かれます（すでに書いた文は消さずに後ろへ足します）。
+会議の冒頭に資料全体の全体メモとして入れておくと、議事録の書き出しでは「メモ」の節の先頭（`（資料全体）`）に出ます。
+
+テンプレートは資料フォルダ直下の設定ファイル `.document-memo-kakikomi.json` の `templates` に書きます（下記の `docxHeadings` と同じファイル）。フォルダを Git や同期フォルダで共有すれば、メンバー全員が同じ型で書けます。
+書かなければ「定例会」のテンプレートを 1 つ出します。`[]` にするとボタンを出しません。
+
+```json
+{
+  "templates": [
+    { "name": "定例会", "text": ["出席者：", "欠席：", "議題：", "1. ", "次回日程："] },
+    { "name": "レビュー会", "text": "指摘者：
+対象版：
+総評：" }
+  ]
+}
+```
+
+`text` は文字列（改行は `
+`）か、1 行ずつの配列で書けます。
+
 ### 議事録の書き出し
 
 ノート一覧の `[ 議事録 ]` で、開いている資料のノート（絞り込みに関係なく全件）から議事録の Markdown を作ります。
@@ -253,7 +275,7 @@ Excel の再アンカーは「記録位置に同じ値と見出し → 同じ値
 - `src/lib/pptx.ts` — PowerPoint の読み込み（JSZip でスライドの XML を読み、スライドごとの HTML に）
 - `src/lib/pdf.ts` — PDF の読み込み（pdf.js でページ画像と文字の層の HTML に）。補助データは `vite.config.ts` の `pdfjsAssets` で同梱
 - `src/lib/sheet.ts` / `xlsx.ts` — Excel のシートデータとセル範囲アンカー（SheetJS に依存しない） / SheetJS による読み込み
-- `src/lib/config.ts` — フォルダ設定 `.document-memo-kakikomi.json` の読み込み
+- `src/lib/config.ts` — フォルダ設定 `.document-memo-kakikomi.json` の読み込み（Word の見出しスタイル・全体メモのテンプレート）
 - `src/components/Viewer.tsx` — Markdown 表示、選択検知、CSS Custom Highlight API によるハイライト（資料 DOM を変更しない）
 - `src/components/SheetViewer.tsx` — Excel 表示（表は一度だけ描画し、選択・ハイライトは上に重ねた枠で描く）
 - `src/lib/noteMeta.ts` — ノートの種類・担当者・期限と、会議中の入力記法
