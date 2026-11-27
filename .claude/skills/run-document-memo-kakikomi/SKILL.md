@@ -96,6 +96,7 @@ node $D stop      # アプリ・vite・tauri CLI を止める
 | `click "質問 1" "[role=dialog]"` → `click "回答済み" "[role=dialog]"` → `click "元に戻す" "[role=dialog]"` | ボードの種類を質問だけにし、行の右のボタンで回答済みにする（宿題は `完了`）。ほかの資料のノートファイルにも書き込む。種類の「すべて」とタブの「宿題・質問」は別のボタン |
 | `click "決定事項" "[role=dialog]"` → `type <語>` → `click "[決定]<内容の先頭>" "[role=dialog]"` | 決定事項の台帳に切り替え、検索して移動（検索欄は開くとフォーカスされる。最後に開いたタブを覚えている） |
 | `card <コメント> "削除"` → `card <コメント> "y"` | ノートを削除（確認の y/n がある）。戻すのは `key z ctrl` か `click "元に戻す" aside` |
+| `click "2. 検討事項" nav` / `click "«" nav` / `click "目次 »"` | Word・Markdown の左の見出しの目次で移動 / 目次を閉じる / 開く |
 | `where` | 作業フォルダ・ログ・デモフォルダの場所 |
 
 ## Run (human path)
@@ -107,7 +108,7 @@ npm run tauri dev   # → ウィンドウが開く。前回開いたフォルダ
 ## Test
 
 ```bash
-npm test                       # vitest（148 件）
+npm test                       # vitest（153 件）
 npx tsc --noEmit -p .
 npm run build
 (cd src-tauri && cargo test)   # 12 件

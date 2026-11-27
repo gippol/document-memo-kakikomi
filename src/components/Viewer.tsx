@@ -5,8 +5,10 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { trimRange, type AnchorLocation } from "../lib/anchor";
 import type { TextDoc } from "../lib/document";
-import { headingSpans, linesOfRange, locateInHtml, pageSpans, slideSpans, TextIndex, type PageSpan, type SlideSpan } from "../lib/dom";
+import { headingElements, headingSpans, linesOfRange, locateInHtml, pageSpans, slideSpans, TextIndex, type PageSpan, type SlideSpan } from "../lib/dom";
 import type { HeadingSpan, PlaceOption } from "../lib/place";
+import { LS_KEYS, lsGet, lsSet } from "../lib/storage";
+import { lastAtOrAbove, notesPerEntry, tocEntries, type TocEntry } from "../lib/toc";
 
 export interface HighlightSpec {
   id: string;
@@ -119,6 +121,16 @@ export function Viewer(props: Props) {
   const [pages, setPages] = useState<PageSpan[]>([]);
   /** 一覧で示す「いまのスライド／ページ」の番号 */
   const [currentSlide, setCurrentSlide] = useState(1);
+  /** Word・Markdown の見出しの目次と、いま読んでいる節（目次の項目番号） */
+  const [toc, setToc] = useState<TocEntry[]>([]);
+  const [currentHeading, setCurrentHeading] = useState(0);
+  const [tocOpen, setTocOpen] = useState(() => lsGet(LS_KEYS.tocOpen) !== "0");
+  /**
+   * 目次から移動した見出し。利用者が自分でスクロールするまでは、これを「いまの節」にする
+   * （資料の末尾の短い節は画面の上 1/3 まで来ないため）
+   */
+  const jumpedRef = useRef<number | null>(null);
+  const tocNavRef = useRef<HTMLElement>(null);
   /** 描画した本文のテキスト索引（本文が変わるたびに作り直す） */
   const indexRef = useRef<TextIndex | null>(null);
   const cbRef = useRef(props);
@@ -138,22 +150,15 @@ export function Viewer(props: Props) {
         return s ? { scope: "slide", slide: s.no, slideId: s.id, heading: s.title || undefined } : null;
       }
       if (pages.length > 0) return { scope: "page", page: currentSlide };
-      const body = bodyRef.current;
-      const sc = scrollRef.current;
-      if (!body || !sc) return null;
-      // 画面の上から 1/3 までに出ている最後の見出し（無ければ画面より上にある最後の見出し）
-      const line = sc.getBoundingClientRect().top + sc.clientHeight / 3;
-      let heading: string | undefined;
-      for (const h of body.querySelectorAll("h1,h2,h3,h4,h5,h6")) {
-        if (h.getBoundingClientRect().top > line) break;
-        heading = h.textContent?.trim().slice(0, 60) || heading;
-      }
-      return heading ? { scope: "heading", heading } : null;
+      // 目次で示している節と同じもの（見出しより前を見ているときは資料全体）
+      const i = headingAtLine();
+      return i >= 0 && toc[i] ? { scope: "heading", heading: toc[i].text } : null;
     },
     scrollToRange(start, end) {
       const sc = scrollRef.current;
       const r = indexRef.current?.rangeAt(start, end);
       if (!r || !sc) return;
+      jumpedRef.current = null;
       const rect = r.getBoundingClientRect();
       const scRect = sc.getBoundingClientRect();
       sc.scrollTo({ top: sc.scrollTop + rect.top - scRect.top - sc.clientHeight / 3, behavior: "smooth" });
@@ -169,7 +174,10 @@ export function Viewer(props: Props) {
     const ps = pageSpans(bodyRef.current, index);
     setSlides(spans);
     setPages(ps);
-    cbRef.current.onTextReady(index.text, spans, ps, spans.length > 0 || ps.length > 0 ? [] : headingSpans(bodyRef.current, index));
+    const hs = spans.length > 0 || ps.length > 0 ? [] : headingSpans(bodyRef.current, index);
+    setToc(tocEntries(hs, index.text.length));
+    setCurrentHeading(0);
+    cbRef.current.onTextReady(index.text, spans, ps, hs);
     setTextVersion((v) => v + 1);
     setFloatPos(null);
   }, [docKey]);
@@ -272,8 +280,13 @@ export function Viewer(props: Props) {
   const onScroll = () => {
     const sc = scrollRef.current;
     const body = bodyRef.current;
-    if (!sc || !body || (slides.length === 0 && pages.length === 0)) return;
+    if (!sc || !body) return;
     const line = sc.getBoundingClientRect().top + sc.clientHeight / 3;
+    if (toc.length > 0) {
+      setCurrentHeading(Math.max(0, headingAtLine()));
+      return;
+    }
+    if (slides.length === 0 && pages.length === 0) return;
     let cur = 1;
     for (const s of body.querySelectorAll<HTMLElement>(`section[data-${unitAttr}]`)) {
       if (s.getBoundingClientRect().top > line) break;
@@ -289,6 +302,53 @@ export function Viewer(props: Props) {
     sc.scrollTo({ top: sc.scrollTop + s.getBoundingClientRect().top - sc.getBoundingClientRect().top - 12 });
   };
 
+  /** 画面の上 1/3 にかかる最後の見出し（目次の項目番号。目次から移動した直後はその見出し）。見出しより前なら -1 */
+  const headingAtLine = (): number => {
+    if (jumpedRef.current !== null) return jumpedRef.current;
+    const sc = scrollRef.current;
+    const body = bodyRef.current;
+    if (!sc || !body) return -1;
+    const line = sc.getBoundingClientRect().top + sc.clientHeight / 3;
+    const hs = headingElements(body);
+    return lastAtOrAbove(hs.length, (i) => hs[i].getBoundingClientRect().top, line);
+  };
+
+  const goHeading = (i: number) => {
+    const sc = scrollRef.current;
+    const h = bodyRef.current && headingElements(bodyRef.current)[i];
+    if (!sc || !h) return;
+    jumpedRef.current = i;
+    setCurrentHeading(i);
+    sc.scrollTo({ top: sc.scrollTop + h.getBoundingClientRect().top - sc.getBoundingClientRect().top - 12 });
+  };
+  /** 利用者が自分でスクロールし始めたら、位置から求めるのに戻す */
+  const releaseJump = () => {
+    jumpedRef.current = null;
+  };
+
+  const toggleToc = () => {
+    lsSet(LS_KEYS.tocOpen, tocOpen ? "0" : "1");
+    setTocOpen(!tocOpen);
+  };
+
+  // いまの節が目次の見えないところにあれば、目次をスクロールして見せる
+  useEffect(() => {
+    // scrollIntoView は外側の要素までスクロールすることがあるので、目次だけを動かす
+    const nav = tocNavRef.current;
+    const item = nav?.querySelector<HTMLElement>(`[data-toc="${currentHeading}"]`);
+    if (!nav || !item) return;
+    const n = nav.getBoundingClientRect();
+    const r = item.getBoundingClientRect();
+    const header = nav.firstElementChild?.getBoundingClientRect().height ?? 0;
+    if (r.top < n.top + header) nav.scrollTop -= n.top + header - r.top;
+    else if (r.bottom > n.bottom) nav.scrollTop += r.bottom - n.bottom;
+  }, [currentHeading, tocOpen]);
+
+  const notesPerHeading = useMemo(
+    () => notesPerEntry(toc, highlights.map((h) => h.start)),
+    [toc, highlights],
+  );
+
   const notesPerSlide = useMemo(() => {
     const units: { no: number; start: number; end: number }[] = slides.length > 0 ? slides : pages;
     const m = new Map<number, number>();
@@ -300,7 +360,14 @@ export function Viewer(props: Props) {
   }, [highlights, slides, pages]);
 
   const view = (
-    <div ref={scrollRef} className="relative h-full min-w-0 flex-1 overflow-auto bg-paper" onScroll={onScroll}>
+    <div
+      ref={scrollRef}
+      className="relative h-full min-w-0 flex-1 overflow-auto bg-paper"
+      onScroll={onScroll}
+      onWheel={releaseJump}
+      onPointerDown={releaseJump}
+      onKeyDown={releaseJump}
+    >
       {doc.kind === "markdown" && doc.encoding !== "UTF-8" && (
         <p className="mx-auto max-w-[820px] px-12 pt-3 text-xs text-ink-dim">文字コード: {doc.encoding} として表示しています</p>
       )}
@@ -400,6 +467,48 @@ export function Viewer(props: Props) {
             </button>
           ))}
         </nav>
+        {view}
+      </div>
+    );
+  }
+  if (doc.kind === "docx" || doc.kind === "markdown") {
+    // 目次の有無・開閉で本文（view）の位置が変わると React が本文を作り直し、テキスト索引が古い DOM を指してしまう。
+    // 見出しが無くても常に同じ形（目次の欄＋本文）で返す
+    const tocPane =
+      toc.length === 0 ? null : !tocOpen ? (
+        <button
+          className="w-6 shrink-0 border-r border-line py-2 text-xs text-dim hover:bg-line hover:text-fg [writing-mode:vertical-rl]"
+          title="見出しの目次を開く"
+          onClick={toggleToc}
+        >
+          目次 »
+        </button>
+      ) : (
+        <nav ref={tocNavRef} aria-label="見出しの目次" className="w-52 shrink-0 overflow-auto border-r border-line pb-1 text-xs">
+          <div className="sticky top-0 flex items-center bg-bg px-2 py-0.5 text-dim">
+            <span>目次</span>
+            <button className="ml-auto px-1 hover:text-fg" title="目次を閉じる" aria-label="目次を閉じる" onClick={toggleToc}>
+              «
+            </button>
+          </div>
+          {toc.map((e) => (
+            <button
+              key={e.index}
+              data-toc={e.index}
+              className={`flex w-full gap-1 py-0.5 pr-2 text-left hover:bg-line ${e.index === currentHeading ? "text-accent" : e.depth === 0 ? "text-bright" : ""}`}
+              style={{ paddingLeft: 8 + Math.min(e.depth, 4) * 12 }}
+              title={e.text}
+              onClick={() => goHeading(e.index)}
+            >
+              <span className="truncate">{e.text}</span>
+              {notesPerHeading.get(e.index) ? <span className="ml-auto shrink-0 text-dim">({notesPerHeading.get(e.index)})</span> : null}
+            </button>
+          ))}
+        </nav>
+      );
+    return (
+      <div className="flex h-full">
+        {tocPane}
         {view}
       </div>
     );

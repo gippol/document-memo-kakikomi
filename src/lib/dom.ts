@@ -175,10 +175,16 @@ export function pageSpans(root: Element, index: Pick<TextIndex, "offsetOf"> = { 
 
 /** 見出し（h1〜h6）の文言と表示テキスト上の位置。文言は locateInHtml の heading と同じく 60 文字まで */
 export function headingSpans(root: Element, index: Pick<TextIndex, "offsetOf"> = { offsetOf: (n, o) => offsetOf(root, n, o) }): HeadingSpan[] {
-  return Array.from(root.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6")).flatMap((h) => {
-    const text = h.textContent?.trim().slice(0, 60);
-    return text ? [{ text, level: Number(h.tagName[1]), start: index.offsetOf(h, 0) }] : [];
-  });
+  return headingElements(root).map((h) => ({
+    text: h.textContent!.trim().slice(0, 60),
+    level: Number(h.tagName[1]),
+    start: index.offsetOf(h, 0),
+  }));
+}
+
+/** 文言のある見出しの要素（文書の順）。headingSpans と同じ並びなので、番号で対応が取れる */
+export function headingElements(root: Element): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6")).filter((h) => h.textContent?.trim());
 }
 
 /** Range の位置を「段落番号＋直前の見出し」で表す（PowerPoint は「スライド番号＋そのタイトル」） */

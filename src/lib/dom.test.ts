@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { containerText, headingSpans, linesOfRange, locateInHtml, offsetOf, pageSpans, rangeFromOffsets, slideSpans, TextIndex } from "./dom";
+import { containerText, headingElements, headingSpans, linesOfRange, locateInHtml, offsetOf, pageSpans, rangeFromOffsets, slideSpans, TextIndex } from "./dom";
 
 function mount(html: string): HTMLElement {
   const root = document.createElement("div");
@@ -81,6 +81,8 @@ describe("TextIndex", () => {
       { text: "1.1 経緯", level: 2, start: text.indexOf("1.1 経緯") },
     ]);
     expect(headingSpans(root, new TextIndex(root))).toEqual(headingSpans(root));
+    // 目次の項目番号から要素を引けるよう、headingElements は同じ並び
+    expect(headingElements(root).map((h) => h.tagName)).toEqual(["H1", "H2"]);
   });
 
   it("大きな資料でもハイライトの Range 作成が全文走査より速い", () => {
