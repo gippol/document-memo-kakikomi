@@ -1,6 +1,6 @@
 ---
 name: run-document-memo-kakikomi
-description: Run, start, launch, drive, and screenshot the document-memo-kakikomi Tauri desktop app (資料メモ) on Windows — add notes, export minutes (議事録), test the save dialog, or check a UI change in the real app instead of only unit tests. Also covers build and test commands.
+description: Run, start, launch, drive, and screenshot the document-memo-kakikomi Tauri desktop app (資料メモ かきこみ) on Windows — add notes, export minutes (議事録), test the save dialog, or check a UI change in the real app instead of only unit tests. Also covers build and test commands.
 ---
 
 Tauri v2 + React のデスクトップアプリ（Windows の WebView2 で描画）。

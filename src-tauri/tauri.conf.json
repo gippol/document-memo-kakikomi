@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "資料メモ",
+  "productName": "資料メモ かきこみ",
   "mainBinaryName": "document-memo-kakikomi",
   "version": "0.2.0",
   "identifier": "com.shiryomemo.app",
@@ -13,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "資料メモ",
+        "title": "資料メモ かきこみ",
         "width": 1400,
         "height": 900,
         "minWidth": 900,

@@ -9,5 +9,5 @@
  */
 import { version } from "../../package.json";
 
-export const APP_NAME = "資料メモ";
+export const APP_NAME = "資料メモ かきこみ";
 export const APP_VERSION: string = version;

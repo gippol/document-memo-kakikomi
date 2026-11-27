@@ -1,4 +1,4 @@
-# 資料メモ
+# 資料メモ かきこみ
 
 会議資料（Markdown / Word / Excel / PowerPoint / PDF）を **一切書き換えず**、資料ごとの別ファイル `<資料名>.notes.json` にメモを残すデスクトップアプリです。
 （Tauri v2 + React + TypeScript + Tailwind CSS）
@@ -16,7 +16,7 @@ npm test              # ユニットテスト
 
 ### 名前と版
 
-- 画面・ウィンドウ・インストーラーに出す名前は「資料メモ」（`tauri.conf.json` の `productName`・ウィンドウの `title`、`index.html`）
+- 画面・ウィンドウ・インストーラーに出す名前は「資料メモ かきこみ」（`tauri.conf.json` の `productName`・ウィンドウの `title`、`index.html`）
 - 内部の名前は英数字の `document-memo-kakikomi` のまま（npm・Cargo のパッケージ名、実行ファイル名 `mainBinaryName`、`localStorage`・設定ファイルの名前）。識別子 `com.shiryomemo.app` も変えない（アプリのデータ `%APPDATA%\com.shiryomemo.app` などの置き場所が変わるため）
 - 版を上げるときは `package.json`・`src-tauri/Cargo.toml`・`src-tauri/tauri.conf.json` の 3 か所を同じにする（そろっていないと `src/lib/appInfo.test.ts` が失敗する）。画面の版は `package.json` から読む
 

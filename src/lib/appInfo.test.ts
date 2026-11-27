@@ -16,7 +16,7 @@ describe("アプリの名前と版の表記", () => {
     expect(cargoVersion).toBe(APP_VERSION);
     expect(tauriConf.version).toBe(APP_VERSION);
   });
-  it("インストーラー・ウィンドウ・HTML の名前は「資料メモ」", () => {
+  it("インストーラー・ウィンドウ・HTML の名前は「資料メモ かきこみ」", () => {
     expect(tauriConf.productName).toBe(APP_NAME);
     expect(tauriConf.app.windows.map((w: { title: string }) => w.title)).toEqual([APP_NAME]);
     expect(read("index.html")).toContain(`<title>${APP_NAME}</title>`);
