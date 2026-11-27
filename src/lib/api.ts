@@ -47,6 +47,13 @@ export const api = {
   readDocument: (root: string, rel: string) => invoke<DocContent>("read_document", { root, rel }),
   readDocumentBytes: (root: string, rel: string) => invoke<ArrayBuffer>("read_document_bytes", { root, rel }),
   readConfig: (root: string) => invoke<string | null>("read_config", { root }),
+  /**
+   * PDF の描画結果のキャッシュ（アプリのキャッシュフォルダ。資料フォルダには置かない）。
+   * key は PDF の版ごとの 64 桁の 16 進、name は text.json か p<ページ>.png。無ければ空の ArrayBuffer
+   */
+  pdfCacheGet: (key: string, name: string) => invoke<ArrayBuffer>("pdf_cache_get", { key, name }),
+  pdfCachePut: (key: string, name: string, data: Uint8Array) =>
+    invoke<void>("pdf_cache_put", data, { headers: { "x-cache-key": key, "x-cache-name": name } }),
   readNotes: (root: string, rel: string) => invoke<string | null>("read_notes", { root, rel }),
   /**
    * ノートファイルを書き込む。expected は最後に読んだ／書いた内容（null はファイルが無い想定）。

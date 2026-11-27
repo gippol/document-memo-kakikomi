@@ -203,6 +203,84 @@ export function Viewer(props: Props) {
     return () => ro.disconnect();
   }, [doc.kind, docKey]);
 
+  // PDF: ページ画像は、表示欄とその上下 1 画面分にあるページだけ描く（全ページ描くと大きい PDF で十数秒かかる）。
+  // 一度に 1 ページずつ、表示欄の中心に近いページから描く。描く前のページは白い枠だけ（大きさは CSS で決まる）
+  useEffect(() => {
+    const sc = scrollRef.current;
+    const body = bodyRef.current;
+    if (doc.kind !== "pdf" || !sc || !body) return;
+    const images = doc.images;
+    const wanted = new Map<number, HTMLElement>();
+    /** 描けなかった回数。表示欄の近くにあるうちは、少し待って 3 回までやり直す */
+    const failures = new Map<number, number>();
+    const near = new Set<number>();
+    let busy = false;
+    let stopped = false;
+    const nearest = () => {
+      const mid = sc.getBoundingClientRect().top + sc.clientHeight / 2;
+      let best: [number, HTMLElement] | null = null;
+      let bestD = Infinity;
+      for (const [no, s] of wanted) {
+        const r = s.getBoundingClientRect();
+        const d = Math.abs((r.top + r.bottom) / 2 - mid);
+        if (d < bestD) [best, bestD] = [[no, s], d];
+      }
+      return best;
+    };
+    const pump = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        for (let next = nearest(); next && !stopped; next = nearest()) {
+          const [no, section] = next;
+          wanted.delete(no);
+          const img = section.querySelector<HTMLImageElement>("img.pdf-img");
+          if (!img || img.getAttribute("src")) continue;
+          try {
+            const url = await images.url(no);
+            if (!stopped) img.src = url;
+          } catch (e) {
+            if (stopped) break;
+            console.warn(`p.${no} を描けません`, e);
+            const n = (failures.get(no) ?? 0) + 1;
+            failures.set(no, n);
+            if (n < 3) {
+              setTimeout(() => {
+                if (stopped || !near.has(no)) return;
+                wanted.set(no, section);
+                void pump();
+              }, 1000 * n);
+            }
+          }
+        }
+      } finally {
+        busy = false;
+      }
+    };
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const s = e.target as HTMLElement;
+          const no = Number(s.dataset.page);
+          if (e.isIntersecting) {
+            near.add(no);
+            wanted.set(no, s);
+          } else {
+            near.delete(no);
+            wanted.delete(no);
+          }
+        }
+        void pump();
+      },
+      { root: sc, rootMargin: "100% 0px" },
+    );
+    body.querySelectorAll<HTMLElement>("section[data-page]").forEach((s) => io.observe(s));
+    return () => {
+      stopped = true;
+      io.disconnect();
+    };
+  }, [doc, docKey]);
+
   // ハイライト描画
   useEffect(() => {
     const index = indexRef.current;
