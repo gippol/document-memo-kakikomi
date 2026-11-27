@@ -1,0 +1,31 @@
+# TypeScript 側のテストと型検査（TASKS 10-1）。Rust 側は別に足す
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同じブランチ・PR で新しく走ったら古い実行は止める
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  typescript:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: テスト
+        run: npm test
+      - name: 型検査
+        run: npx tsc --noEmit -p .
