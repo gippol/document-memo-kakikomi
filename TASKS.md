@@ -33,7 +33,13 @@
 ## 🟢 優先度：低（品質・使いやすさ）
 
 - [ ] **10. テスト・CI の整備**（Rust のテスト、`notesFile.ts` のテスト、GitHub Actions、ESLint）
-- [ ] **11. アプリ名・バージョン表記の統一**（`productName` / Cargo / npm / 画面表示 / `authors`）
+  - 現状: テストは揃ってきた（vitest 約 200 件・`cargo test` 15 件、`notesFile.test.ts` もある）が、走らせるのは手元だけ。PR で確認が抜けると気づけない
+  - [ ] まず GitHub Actions で TypeScript 側の CI: PR とプッシュのたびに `npm ci` → `npm test` → `npx tsc --noEmit -p .`（`.github/workflows/ci.yml` を 1 つ置く。Windows でなく ubuntu で足りる。版と名前のずれも `appInfo.test.ts` で見つかる）
+  - [ ] Rust の CI: `cargo test`・`cargo clippy`。Tauri のビルドに要るもの（ubuntu なら webkit2gtk など、または windows-latest）を入れる必要があり重いので、TypeScript 側の後
+  - [ ] ESLint（React のフックの依存配列の漏れなど）。入れたら CI でも走らせる
+  - [ ] 余裕があれば `npm run tauri build` でインストーラーが作れることも CI で確かめる（時間がかかるので main へのマージ時だけ）
+- [x] **11. アプリ名・バージョン表記の統一**（`productName` / Cargo / npm / 画面表示 / `authors`）
+  - 対応: 画面に出す名前は「資料メモ」（`productName`・ウィンドウのタイトル・最初の画面）。実行ファイル名（`mainBinaryName`）・パッケージ名・識別子は英数字のまま。最初の画面の版は `v0.1.0` の書き込みをやめて `package.json` から読む。`authors` は `gippol`。3 つのファイルの版と名前がそろっていることを `appInfo.test.ts` で確かめる
 - [ ] **12. 機能追加**（全ノート横断検索、Markdown/CSV 書き出し、削除の取り消し、タグ・状態）
 - [x] **13. clippy の軽微な指摘 2 件**（`collapsible_if` は let チェーンに、`unnecessary_sort_by` は `sort_by_key` に）
 

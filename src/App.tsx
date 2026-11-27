@@ -13,6 +13,7 @@ import { useWorkspace } from "./hooks/useWorkspace";
 import { api, errMsg, NOTES_CONFLICT } from "./lib/api";
 import { collectBoard, dueAlertMessage, dueAlert, setNoteDone, type BoardItem, type FolderNote } from "./lib/board";
 import { createAnchor } from "./lib/anchor";
+import { APP_NAME, APP_VERSION } from "./lib/appInfo";
 import { fieldsOf, fieldsPatch, hasTask, sameFields, type NoteFields } from "./lib/noteMeta";
 import {
   buildNoteViews,
@@ -445,7 +446,7 @@ export default function App() {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="w-[56ch]">
-          <pre className="text-bright">{"document-memo-kakikomi v0.1.0\n------------------"}</pre>
+          <pre className="text-bright">{`${APP_NAME} v${APP_VERSION}\n------------------`}</pre>
           <p className="mt-2 text-dim">資料を変更せず、別ファイル (.notes.json) にメモを残します。</p>
           <p className="mt-4">
             <span className="text-dim">&gt; </span>

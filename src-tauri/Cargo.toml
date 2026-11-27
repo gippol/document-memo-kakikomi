@@ -1,8 +1,8 @@
 [package]
 name = "document-memo-kakikomi"
 version = "0.2.0"
-description = "資料別メモ管理アプリ"
-authors = ["you"]
+description = "資料メモ: 会議資料を書き換えずにメモを残すデスクトップアプリ"
+authors = ["gippol"]
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

@@ -14,6 +14,12 @@ npm run tauri build   # インストーラ作成
 npm test              # ユニットテスト
 ```
 
+### 名前と版
+
+- 画面・ウィンドウ・インストーラーに出す名前は「資料メモ」（`tauri.conf.json` の `productName`・ウィンドウの `title`、`index.html`）
+- 内部の名前は英数字の `document-memo-kakikomi` のまま（npm・Cargo のパッケージ名、実行ファイル名 `mainBinaryName`、`localStorage`・設定ファイルの名前）。識別子 `com.shiryomemo.app` も変えない（アプリのデータ `%APPDATA%\com.shiryomemo.app` などの置き場所が変わるため）
+- 版を上げるときは `package.json`・`src-tauri/Cargo.toml`・`src-tauri/tauri.conf.json` の 3 か所を同じにする（そろっていないと `src/lib/appInfo.test.ts` が失敗する）。画面の版は `package.json` から読む
+
 `samples/` フォルダを開くと動作を試せます（`node scripts/make-sample-docx.mjs` / `make-sample-xlsx.mjs` / `make-sample-pptx.mjs` / `make-sample-pdf.mjs` でサンプルの Word / Excel / PowerPoint / PDF を再生成。PDF は Microsoft Edge で作ります）。
 
 ## 使い方
