@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, copyText, errMsg } from "../lib/api";
 import { buildMinutes, minutesFileName } from "../lib/minutes";
+import { formatDate } from "../lib/noteMeta";
+import { inSession, listSessions } from "../lib/session";
 import type { NoteView } from "./NotesPanel";
+import { SessionSelect } from "./SessionSelect";
 
 interface Props {
   root: string;
   docPath: string;
   views: NoteView[];
+  /** 最初に選んでおく会議の回（ノート一覧で選んでいる回。null はすべての回） */
+  session: string | null;
   onClose(): void;
 }
 
@@ -14,13 +19,21 @@ interface Props {
  * ノートから作った議事録の Markdown を表示し、クリップボードへのコピーと .md での保存をする。
  * 表示した Markdown はその場で手直ししてからコピー・保存できる。
  */
-export function MinutesDialog({ root, docPath, views, onClose }: Props) {
+export function MinutesDialog({ root, docPath, views, session: initialSession, onClose }: Props) {
   const [includeQuotes, setIncludeQuotes] = useState(true);
   // 開いている間に資料・ノートが再読込されても手直しが消えないよう、開いた時点のノートで作る
   const [snapshot] = useState(views);
+  const sessions = useMemo(() => listSessions(snapshot.map((v) => v.note)), [snapshot]);
+  const [session, setSession] = useState(initialSession);
+  // ある回だけを書き出すときは、議事録の日付・ファイル名をその回の日にする
+  const meetingDate = session ?? formatDate(new Date());
   const generated = useMemo(
-    () => buildMinutes(snapshot, { docPath, today: new Date(), includeQuotes }),
-    [snapshot, docPath, includeQuotes],
+    () =>
+      buildMinutes(
+        snapshot.filter((v) => inSession(v.note, session)),
+        { docPath, today: new Date(), includeQuotes, meetingDate: session ?? undefined },
+      ),
+    [snapshot, session, docPath, includeQuotes],
   );
   const [text, setText] = useState(generated);
   const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -51,7 +64,7 @@ export function MinutesDialog({ root, docPath, views, onClose }: Props) {
 
   const save = async () => {
     try {
-      const path = await api.saveMinutes(root, docPath, minutesFileName(docPath, new Date()), text);
+      const path = await api.saveMinutes(root, docPath, minutesFileName(docPath, meetingDate), text);
       if (path) setStatus({ ok: true, msg: `保存しました: ${path}` });
     } catch (e) {
       setStatus({ ok: false, msg: errMsg(e) });
@@ -68,6 +81,9 @@ export function MinutesDialog({ root, docPath, views, onClose }: Props) {
       >
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-line px-2 py-1">
           <span className="text-bright">議事録の書き出し</span>
+          {(sessions.length >= 2 || session !== null) && (
+            <SessionSelect sessions={sessions} value={session} onChange={setSession} total={snapshot.length} />
+          )}
           <label className="flex items-center gap-1 text-dim">
             <input type="checkbox" checked={includeQuotes} onChange={(e) => setIncludeQuotes(e.target.checked)} />
             資料の引用を含める

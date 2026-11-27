@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { AnchorLocation, AnchorStatus } from "../lib/anchor";
 import { insertTemplate, type NoteTemplate } from "../lib/config";
 import {
@@ -18,7 +18,9 @@ import {
 import { locationLabel } from "../lib/noteViews";
 import type { Note } from "../lib/notesFile";
 import { placeLabel, type PlaceOption, type PlaceTarget } from "../lib/place";
+import { sessionLabel, sessionOf, type SessionCount } from "../lib/session";
 import type { CellRange } from "../lib/sheet";
+import { SessionSelect } from "./SessionSelect";
 
 /** ノートが現在の資料で指している範囲（全体メモはスライド・見出しの先頭、またはシート） */
 export type NoteTarget = { kind: "text"; start: number; end: number } | { kind: "cell"; sheet: string; range: CellRange } | PlaceTarget;
@@ -55,8 +57,13 @@ interface Props {
   onSortMode(m: SortMode): void;
   filter: NoteFilter;
   onFilter(f: NoteFilter): void;
-  /** 絞り込む前の件数 */
+  /** 種類で絞り込む前の件数（回では絞り込んだ後） */
   counts: Record<NoteFilter, number>;
+  /** この資料のノートのある会議の回（ノートの作成日）と件数 */
+  sessions: SessionCount[];
+  /** 選んでいる回（null はすべての回） */
+  session: string | null;
+  onSession(s: string | null): void;
   onExportMinutes(): void;
   onAddFromSelection(): void;
   onAddPlace(): void;
@@ -419,7 +426,13 @@ function NoteCard(props: {
 }
 
 export function NotesPanel(props: Props) {
-  const { items, activeId, focusTick, draft, counts } = props;
+  const { items, activeId, focusTick, draft, counts, sessions, session } = props;
+  // 回が 1 つだけなら選ぶ必要がないので出さない
+  const showSessions = sessions.length >= 2 || session !== null;
+  const allSessionsTotal = sessions.reduce((n, s) => n + s.count, 0);
+  // 新しい順ですべての回を出しているときは、回の区切りを入れる
+  const sessionBreaks = props.sortMode === "timeline" && session === null && sessions.length >= 2;
+  const today = new Date();
   const cardRefs = useRef(new Map<string, HTMLDivElement>());
   const [flashId, setFlashId] = useState<string | null>(null);
 
@@ -456,6 +469,12 @@ export function NotesPanel(props: Props) {
         ))}
       </div>
 
+      {showSessions && (
+        <div className="flex flex-wrap items-center gap-x-1 border-b border-line px-2 py-1">
+          <SessionSelect sessions={sessions} value={session} onChange={props.onSession} total={allSessionsTotal} />
+        </div>
+      )}
+
       {counts.all > 0 && (
         <div className="flex flex-wrap items-center gap-x-1 border-b border-line px-2 py-1">
           <span className="text-dim">filter:</span>
@@ -482,7 +501,8 @@ export function NotesPanel(props: Props) {
             )}
           </div>
         )}
-        {counts.all === 0 && !draft && (
+        {counts.all === 0 && !draft && session !== null && <p className="px-2 py-4 text-dim">-- この回のノートなし --</p>}
+        {counts.all === 0 && !draft && session === null && (
           <p className="px-2 py-4 text-dim">
             -- ノートなし --
             <br />
@@ -492,25 +512,29 @@ export function NotesPanel(props: Props) {
           </p>
         )}
         {counts.all > 0 && items.length === 0 && !draft && <p className="px-2 py-4 text-dim">-- 該当するノートなし --</p>}
-        {items.map((v) => (
-          <NoteCard
-            key={v.note.id}
-            view={v}
-            active={v.note.id === activeId}
-            flash={v.note.id === flashId}
-            hasSelection={props.hasSelection}
-            cardRef={(el) => {
-              if (el) cardRefs.current.set(v.note.id, el);
-              else cardRefs.current.delete(v.note.id);
-            }}
-            onUpdate={(f) => props.onUpdate(v.note.id, f)}
-            onToggleDone={() => props.onToggleDone(v.note.id)}
-            onDelete={() => props.onDelete(v.note.id)}
-            onJump={() => props.onJump(v.note.id)}
-            onReattach={() => props.onReattach(v.note.id)}
-            onPickSupersede={() => props.onPickSupersede(v.note.id)}
-            onClearSupersede={() => props.onClearSupersede(v.note.id)}
-          />
+        {items.map((v, i) => (
+          <Fragment key={v.note.id}>
+            {sessionBreaks && (i === 0 || sessionOf(items[i - 1].note) !== sessionOf(v.note)) && (
+              <div className="border-b border-line bg-panel px-2 py-0.5 text-dim">── {sessionLabel(sessionOf(v.note), today)} ──</div>
+            )}
+            <NoteCard
+              view={v}
+              active={v.note.id === activeId}
+              flash={v.note.id === flashId}
+              hasSelection={props.hasSelection}
+              cardRef={(el) => {
+                if (el) cardRefs.current.set(v.note.id, el);
+                else cardRefs.current.delete(v.note.id);
+              }}
+              onUpdate={(f) => props.onUpdate(v.note.id, f)}
+              onToggleDone={() => props.onToggleDone(v.note.id)}
+              onDelete={() => props.onDelete(v.note.id)}
+              onJump={() => props.onJump(v.note.id)}
+              onReattach={() => props.onReattach(v.note.id)}
+              onPickSupersede={() => props.onPickSupersede(v.note.id)}
+              onClearSupersede={() => props.onClearSupersede(v.note.id)}
+            />
+          </Fragment>
         ))}
       </div>
 

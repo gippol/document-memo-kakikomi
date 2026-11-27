@@ -5,8 +5,10 @@ import { kindOf, locationLabel, sortNoteViews } from "./noteViews";
 export interface MinutesOptions {
   /** 資料のパス（フォルダからの相対パス） */
   docPath: string;
-  /** 書き出した日 */
+  /** 書き出した日（期限の表示に使う） */
   today: Date;
+  /** 会議の日 YYYY-MM-DD（ある回だけを書き出すとき）。無ければ書き出した日 */
+  meetingDate?: string;
   /** 引用（ノートを付けた資料の文言）を含める */
   includeQuotes: boolean;
 }
@@ -87,7 +89,7 @@ const SECTIONS: { kind: NoteKind; title: string }[] = [
 export function buildMinutes(views: NoteView[], opts: MinutesOptions): string {
   const sorted = sortNoteViews(views, "position");
   const name = opts.docPath.split("/").pop() ?? opts.docPath;
-  const out: string[] = [`# 議事録: ${name}`, "", `- 日付: ${formatDate(opts.today)}`, `- 資料: ${opts.docPath}`];
+  const out: string[] = [`# 議事録: ${name}`, "", `- 日付: ${opts.meetingDate ?? formatDate(opts.today)}`, `- 資料: ${opts.docPath}`];
 
   if (sorted.length === 0) {
     out.push("", "（ノートなし）");
@@ -128,9 +130,9 @@ export function buildMinutes(views: NoteView[], opts: MinutesOptions): string {
   return out.join("\n") + "\n";
 }
 
-/** 書き出すファイル名の候補（例: 定例会議資料.docx → 定例会議資料_議事録_2026-11-23.md） */
-export function minutesFileName(docPath: string, today: Date): string {
+/** 書き出すファイル名の候補（例: 定例会議資料.docx と 2026-11-23 → 定例会議資料_議事録_2026-11-23.md） */
+export function minutesFileName(docPath: string, date: string): string {
   const name = docPath.split("/").pop() ?? docPath;
   const stem = name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : name;
-  return `${stem}_議事録_${formatDate(today)}.md`;
+  return `${stem}_議事録_${date}.md`;
 }

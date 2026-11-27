@@ -152,6 +152,10 @@ describe("buildMinutes", () => {
     expect(md).toContain("### （資料全体）\n\n- 脱線: 来期の話\n\n### 1. 背景\n\n- 背景は口頭で補足あり\n- 背景の補足（¶2）\n");
   });
 
+  it("会議の日を指定すれば、日付はその日にする", () => {
+    expect(buildMinutes([], { ...opts, meetingDate: "2026-11-20" })).toContain("- 日付: 2026-11-20\n");
+    expect(buildMinutes([], opts)).toContain("- 日付: 2026-11-23\n");
+  });
   it("ノートが無ければその旨を書く", () => {
     expect(buildMinutes([], opts)).toContain("（ノートなし）");
   });
@@ -159,7 +163,7 @@ describe("buildMinutes", () => {
 
 describe("minutesFileName", () => {
   it("資料名と日付から付ける", () => {
-    expect(minutesFileName("会議/定例会議資料.docx", TODAY)).toBe("定例会議資料_議事録_2026-11-23.md");
-    expect(minutesFileName("README", TODAY)).toBe("README_議事録_2026-11-23.md");
+    expect(minutesFileName("会議/定例会議資料.docx", "2026-11-23")).toBe("定例会議資料_議事録_2026-11-23.md");
+    expect(minutesFileName("README", "2026-11-20")).toBe("README_議事録_2026-11-20.md");
   });
 });
