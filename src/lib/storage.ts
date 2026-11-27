@@ -6,6 +6,8 @@ export const LS_KEYS = {
   lastRoot: `${PREFIX}lastRoot`,
   lastDoc: (root: string) => `${PREFIX}lastDoc:${root}`,
   layout: `${PREFIX}layout`,
+  /** Word・Markdown の見出しの目次を開いているか（"0" で閉じている） */
+  tocOpen: `${PREFIX}tocOpen`,
   paneSize: (layout: string) => `${PREFIX}notesSize:${layout}`,
 };
 
