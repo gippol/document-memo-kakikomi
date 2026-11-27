@@ -21,10 +21,21 @@ describe("ノートの種類・担当者・期限", () => {
   });
 
   it("読み書きで保たれ、キー順は固定", () => {
-    const note = { ...base, kind: "action", assignee: "田中", due: "2026-12-01", done: true };
+    const note = { ...base, kind: "action", assignee: "田中", due: "2026-12-01", priority: "high", done: true };
     const out = serializeNotesFile(parseNotesFile(json([note]), "a.md"));
-    expect(parseNotesFile(out, "a.md").notes[0]).toMatchObject({ kind: "action", assignee: "田中", due: "2026-12-01", done: true });
-    expect(Object.keys(JSON.parse(out).notes[0])).toEqual(["id", "kind", "comment", "assignee", "due", "done", "createdAt", "updatedAt", "anchor"]);
+    expect(parseNotesFile(out, "a.md").notes[0]).toMatchObject({ kind: "action", assignee: "田中", due: "2026-12-01", priority: "high", done: true });
+    expect(Object.keys(JSON.parse(out).notes[0])).toEqual([
+      "id",
+      "kind",
+      "comment",
+      "assignee",
+      "due",
+      "priority",
+      "done",
+      "createdAt",
+      "updatedAt",
+      "anchor",
+    ]);
   });
 
   it("メモ・空の項目はファイルに書かない（旧形式と同じ出力）", () => {
@@ -33,9 +44,9 @@ describe("ノートの種類・担当者・期限", () => {
   });
 
   it("不正な値のノートは読めないノートとして残す", () => {
-    const f = parseNotesFile(json([{ ...base, kind: "unknown" }, { ...base, id: "n2", due: "12/1" }, { ...base, id: "n3", done: "yes" }]), "a.md");
+    const f = parseNotesFile(json([{ ...base, kind: "unknown" }, { ...base, id: "n2", due: "12/1" }, { ...base, id: "n3", done: "yes" }, { ...base, id: "n4", priority: "urgent" }]), "a.md");
     expect(f.notes).toHaveLength(0);
-    expect(f.invalid).toHaveLength(3);
+    expect(f.invalid).toHaveLength(4);
   });
 });
 

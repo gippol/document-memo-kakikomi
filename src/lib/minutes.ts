@@ -1,5 +1,5 @@
 import type { NoteView } from "../components/NotesPanel";
-import { dueLabel, formatDate, type NoteKind } from "./noteMeta";
+import { dueLabel, formatDate, PRIORITY_LABEL, type NoteKind, type Priority } from "./noteMeta";
 import { kindOf, locationLabel, sortNoteViews } from "./noteViews";
 
 export interface MinutesOptions {
@@ -61,9 +61,16 @@ function sourceOf(v: NoteView): string {
   return [heading && `§ ${heading}`, loc].filter(Boolean).join(" ");
 }
 
+/** 宿題・質問の担当者・期限・優先度の表記（例: `@田中 〜12/1 優先度:高`） */
+export function taskMeta(n: { assignee?: string; due?: string; priority?: Priority }, today: Date): string {
+  return [n.assignee && `@${n.assignee}`, n.due && `〜${dueLabel(n.due, today)}`, n.priority && `優先度:${PRIORITY_LABEL[n.priority]}`]
+    .filter(Boolean)
+    .join(" ");
+}
+
 function taskLine(v: NoteView, kind: NoteKind, today: Date): string {
   const n = v.note;
-  const meta = [n.assignee && `@${n.assignee}`, n.due && `〜${dueLabel(n.due, today)}`].filter(Boolean).join(" ");
+  const meta = taskMeta(n, today);
   const head = kind === "decision" ? "- " : `- [${n.done ? "x" : " "}] `;
   // 箇条書きの続きは 2 文字下げる（4 文字以上下げると Markdown ではコードブロックになる）
   const text = indentRest(body(v), "  ");

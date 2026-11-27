@@ -82,6 +82,26 @@ describe("並べ替え・集計", () => {
     expect(sortNoteViews(views, "timeline").map((v) => v.note.id)).toEqual(["late", "lost", "early"]);
   });
 
+  it("優先度順では未完了の宿題・質問を優先度・期限順に先頭へ、残りは位置順", () => {
+    const vs = buildNoteViews(
+      file([
+        { ...note("memo", OLD, "前置き", "v1"), kind: undefined },
+        { ...note("low", OLD, "ここ", "v1"), kind: "action", priority: "low" },
+        { ...note("none-late", OLD, "重要", "v1"), kind: "action", due: "2026-12-10" },
+        { ...note("mid-soon", OLD, "仕様", "v1"), kind: "question", priority: "medium", due: "2026-12-01" },
+        { ...note("high", OLD, "後書き", "v1"), kind: "action", priority: "high" },
+        { ...note("done-high", OLD, "。", "v1"), kind: "action", priority: "high", done: true },
+      ]),
+      md(OLD, "v1"),
+      OLD,
+      [],
+      [],
+      [],
+      locate,
+    );
+    expect(sortNoteViews(vs, "priority").map((v) => v.note.id)).toEqual(["high", "mid-soon", "none-late", "low", "memo", "done-high"]);
+  });
+
   it("テキストのハイライトは位置のあるノートだけ", () => {
     expect(textHighlights(views).map((h) => h.id)).toEqual(["late", "early"]);
     expect(cellHighlights(views)).toEqual([]);

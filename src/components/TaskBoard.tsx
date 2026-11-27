@@ -15,9 +15,9 @@ import {
   type BoardKind,
   type FolderNote,
 } from "../lib/board";
-import { DONE_LABEL, dueLabel, formatDate, KIND_LABEL } from "../lib/noteMeta";
+import { DONE_LABEL, dueLabel, formatDate, KIND_LABEL, PRIORITY_LABEL } from "../lib/noteMeta";
 import { BoardFooter, BoardRow, firstLine, SourceCell } from "./BoardParts";
-import { KIND_STYLE } from "./NotesPanel";
+import { KIND_STYLE, PRIORITY_STYLE } from "./NotesPanel";
 
 interface Props {
   /** 読み込み中は null */
@@ -97,6 +97,9 @@ export function TaskBoard({ data, today, onJump, onSetDone }: Props) {
         </button>
         <button onClick={() => setGrouping("due")} className={`btn ${grouping === "due" ? "on" : ""}`}>
           期限順
+        </button>
+        <button onClick={() => setGrouping("priority")} className={`btn ${grouping === "priority" ? "on" : ""}`}>
+          優先度別
         </button>
       </div>
 
@@ -228,6 +231,9 @@ function TaskRow({
       }
     >
       <span className={`shrink-0 ${KIND_STYLE[item.kind]}`}>[{KIND_LABEL[item.kind]}]</span>
+      <span className={`w-[2ch] shrink-0 ${n.priority ? PRIORITY_STYLE[n.priority] : ""}`} title={n.priority ? `優先度: ${PRIORITY_LABEL[n.priority]}` : undefined}>
+        {n.priority ? PRIORITY_LABEL[n.priority] : ""}
+      </span>
       <span className="min-w-0 flex-1 truncate text-bright">{firstLine(itemText(item))}</span>
       <span className={`shrink-0 ${unassigned ? "bg-warn px-1 text-bg" : n.assignee ? "text-fg" : "text-dim"}`}>
         {n.assignee ? `@${n.assignee}` : unassigned ? "担当なし" : "@--"}

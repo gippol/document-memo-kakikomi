@@ -3,8 +3,8 @@
  * フォルダ内のすべてのノートファイルから未完了の宿題・未回答の質問を集め、担当者別・期限順に並べて集計する。
  * 資料を開かずに作るので、位置はノートに記録してある情報（スライド番号・見出し・行・段落・セル）で表す。
  */
-import { indentRest, oneLine } from "./minutes";
-import { dueLabel, formatDate, isOpen, isOverdue } from "./noteMeta";
+import { indentRest, oneLine, taskMeta } from "./minutes";
+import { dueLabel, formatDate, isOpen, isOverdue, priorityRank, PRIORITY_LABEL, type Priority } from "./noteMeta";
 import { parseNotesFile, type Note, type NotesFile } from "./notesFile";
 
 /** バックエンドの list_all_notes が返すノートファイル 1 つ分 */
@@ -49,7 +49,7 @@ export interface BoardSummary {
 }
 
 export type BoardFilter = "all" | "overdue" | "thisWeek" | "unassigned";
-export type BoardGrouping = "assignee" | "due";
+export type BoardGrouping = "assignee" | "due" | "priority";
 
 export interface BoardGroup {
   key: string;
@@ -169,11 +169,12 @@ export function filterBoard(items: BoardItem[], filter: BoardFilter, today: Date
   return items;
 }
 
-/** 期限の近い順（期限切れが先頭、期限なしは末尾）。同じなら資料・作成順 */
+/** 期限の近い順（期限切れが先頭、期限なしは末尾）。同じなら優先度（高 → 中・なし → 低）・資料・作成順 */
 export function sortByDue(items: BoardItem[]): BoardItem[] {
   return [...items].sort(
     (a, b) =>
       (a.note.due ?? "9999").localeCompare(b.note.due ?? "9999") ||
+      priorityRank(a.note.priority) - priorityRank(b.note.priority) ||
       a.docPath.localeCompare(b.docPath, "ja") ||
       a.note.createdAt.localeCompare(b.note.createdAt),
   );
@@ -185,10 +186,22 @@ const UNASSIGNED = "担当なし";
  * グループに分ける。
  * - assignee: 担当者ごと。担当なしを先頭にして目立たせ、残りは名前順
  * - due: 期限切れ・今週・来週以降・期限なし
+ * - priority: 高・中・なし・低
  * どのグループの中も期限の近い順
  */
 export function groupBoard(items: BoardItem[], grouping: BoardGrouping, today: Date): BoardGroup[] {
   const sorted = sortByDue(items);
+  if (grouping === "priority") {
+    const keys: (Priority | "none")[] = ["high", "medium", "none", "low"];
+    return keys
+      .map((k) => ({
+        key: `priority:${k}`,
+        label: k === "none" ? "優先度なし" : `優先度: ${PRIORITY_LABEL[k]}`,
+        warn: false,
+        items: sorted.filter((i) => (i.note.priority ?? "none") === k),
+      }))
+      .filter((g) => g.items.length > 0);
+  }
   if (grouping === "assignee") {
     const byName = new Map<string, BoardItem[]>();
     for (const i of sorted) {
@@ -242,7 +255,7 @@ export function boardMarkdown(groups: BoardGroup[], summary: BoardSummary, today
     out.push("", `## ${g.label}`, "");
     for (const i of g.items) {
       const n = i.note;
-      const meta = [n.assignee && `@${n.assignee}`, n.due && `〜${dueLabel(n.due, today)}`].filter(Boolean).join(" ");
+      const meta = taskMeta(n, today);
       const text = indentRest(itemText(i), "  ");
       out.push(`- [ ] ${i.kind === "question" ? "質問: " : ""}${text}${meta ? ` — ${meta}` : ""}（${sourceLabel(i)}）`);
     }

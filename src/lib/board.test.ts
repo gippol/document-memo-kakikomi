@@ -166,6 +166,41 @@ describe("boardMarkdown", () => {
   it("空のとき", () => {
     expect(boardMarkdown([], summarizeBoard([], TODAY), TODAY)).toContain("（未完了の宿題・質問はありません）");
   });
+
+  it("優先度は担当者・期限の後ろに書く", () => {
+    const items = [{ ...item({ comment: "見積", assignee: "田中", due: "2026-12-01", priority: "high" }, "a.md"), where: "L2" }];
+    expect(boardMarkdown(groupBoard(items, "due", TODAY), summarizeBoard(items, TODAY), TODAY)).toContain(
+      "- [ ] 見積 — @田中 〜12/1 優先度:高（a.md L2）",
+    );
+  });
+});
+
+describe("優先度", () => {
+  it("優先度別は 高・中・なし・低 の順で、中は期限順", () => {
+    const items = [
+      item({ comment: "低", priority: "low" }),
+      item({ comment: "なし" }),
+      item({ comment: "中・遅", priority: "medium", due: "2026-12-10" }),
+      item({ comment: "中・早", priority: "medium", due: "2026-12-01" }),
+      item({ comment: "高", priority: "high" }),
+    ];
+    const groups = groupBoard(items, "priority", TODAY);
+    expect(groups.map((g) => [g.label, g.items.map((i) => i.note.comment)])).toEqual([
+      ["優先度: 高", ["高"]],
+      ["優先度: 中", ["中・早", "中・遅"]],
+      ["優先度なし", ["なし"]],
+      ["優先度: 低", ["低"]],
+    ]);
+  });
+
+  it("期限が同じなら優先度の高いほうが先", () => {
+    const items = [
+      item({ comment: "低", due: "2026-12-01", priority: "low" }),
+      item({ comment: "なし", due: "2026-12-01" }),
+      item({ comment: "高", due: "2026-12-01", priority: "high" }),
+    ];
+    expect(groupBoard(items, "due", TODAY)[0].items.map((i) => i.note.comment)).toEqual(["高", "なし", "低"]);
+  });
 });
 
 describe("種類での絞り込み・完了にする", () => {

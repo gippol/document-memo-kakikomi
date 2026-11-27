@@ -1,5 +1,5 @@
 import type { TextAnchor } from "./anchor";
-import { isDueDate, isNoteKind, type NoteKind } from "./noteMeta";
+import { isDueDate, isNoteKind, isPriority, type NoteKind, type Priority } from "./noteMeta";
 import { PLACE_SCOPES, type PlaceAnchor } from "./place";
 import { parseRef, type CellAnchor } from "./sheet";
 
@@ -18,6 +18,8 @@ export interface Note {
   assignee?: string;
   /** 期限 YYYY-MM-DD（宿題・質問のみ） */
   due?: string;
+  /** 優先度（宿題・質問のみ） */
+  priority?: Priority;
   /** 宿題は完了、質問は回答済み */
   done?: boolean;
   /** 決定のみ: この決定で置き換えた前の決定 */
@@ -144,6 +146,7 @@ export function isNote(v: unknown): v is Note {
   if (!isStr(v.id) || !v.id || !isStr(v.comment) || !isStr(v.createdAt) || !isStr(v.updatedAt)) return false;
   if (v.kind !== undefined && !isNoteKind(v.kind)) return false;
   if (!optStr(v.assignee) || (v.due !== undefined && !isDueDate(v.due))) return false;
+  if (v.priority !== undefined && !isPriority(v.priority)) return false;
   if (v.done !== undefined && typeof v.done !== "boolean") return false;
   if (v.supersedes !== undefined && !isSupersedes(v.supersedes)) return false;
   const a = v.anchor;
@@ -167,6 +170,7 @@ export function serializeNotesFile(file: NotesFile): string {
         comment: n.comment,
         assignee: n.assignee || undefined,
         due: n.due || undefined,
+        priority: n.priority || undefined,
         done: n.done || undefined,
         supersedes: n.supersedes ? { id: n.supersedes.id, doc: n.supersedes.doc, text: n.supersedes.text } : undefined,
         createdAt: n.createdAt,
