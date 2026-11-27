@@ -3,6 +3,7 @@ import { api, errMsg, NOTES_CONFLICT, type DocEntry, type OrphanNotes } from "..
 import { CONFIG_FILE, DEFAULT_CONFIG, parseConfig, type FolderConfig } from "../lib/config";
 import { loadDocument, type LoadedDoc } from "../lib/document";
 import type { PageSpan, SlideSpan } from "../lib/dom";
+import type { PageImages } from "../lib/pdf";
 import type { HeadingSpan } from "../lib/place";
 import { mergeNotesFiles, NOTES_SUFFIX, parseNotesFile, serializeNotesFile } from "../lib/notesFile";
 import { LS_KEYS, lsGet, lsSet } from "../lib/storage";
@@ -206,14 +207,14 @@ export function useWorkspace({ onBeforeOpen }: Options) {
 
   // ---------- 外部での変更検知 ----------
 
-  // PDF のページ画像（blob URL）は、表示しなくなったら解放する
-  // （StrictMode で effect が 2 回走っても、表示中の URL は解放しない）
-  const shownPdfUrls = useRef<string[]>([]);
+  // PDF のページ画像（blob URL）と pdf.js の文書は、表示しなくなったら解放する
+  // （StrictMode で effect が 2 回走っても、表示中のものは解放しない）
+  const shownPdf = useRef<PageImages | null>(null);
   useEffect(() => {
-    const prev = shownPdfUrls.current;
-    const cur = doc?.kind === "pdf" ? doc.urls : [];
-    shownPdfUrls.current = cur;
-    if (prev !== cur) prev.forEach((u) => URL.revokeObjectURL(u));
+    const prev = shownPdf.current;
+    const cur = doc?.kind === "pdf" ? doc.images : null;
+    shownPdf.current = cur;
+    if (prev && prev !== cur) prev.dispose();
   }, [doc]);
 
   const handleFsChange = useRef<(paths: string[]) => void>(() => {});
@@ -234,14 +235,17 @@ export function useWorkspace({ onBeforeOpen }: Options) {
       (configChanged ? loadConfig(r) : Promise.resolve())
         .then(() => loadDocument(r, cur, docOptions()))
         .then((c) => {
-          if (pathRef.current !== cur) return;
+          if (pathRef.current !== cur) {
+            if (c.kind === "pdf") c.images.dispose();
+            return;
+          }
           // 表示内容が同じなら再描画しない（Word は見出し設定の変更でハッシュは同じでも HTML が変わる）
-          // PDF のページ画像の URL は読み込むたびに変わるので比べない
+          // PDF は文字が同じでも図が変わることがあるので、バイト列から作ったキャッシュのキーも比べる
           const view = (d: LoadedDoc) =>
-            d.kind === "markdown" ? d.content : d.kind === "xlsx" ? d.sha256 : d.kind === "pdf" ? d.html.replace(/blob:[^"]*/g, "") : d.html;
+            d.kind === "markdown" ? d.content : d.kind === "xlsx" ? d.sha256 : d.kind === "pdf" ? `${d.cacheKey}\n${d.html}` : d.html;
           setDoc((prev) => {
             if (prev && prev.sha256 === c.sha256 && view(prev) === view(c)) {
-              if (c.kind === "pdf") c.urls.forEach((u) => URL.revokeObjectURL(u));
+              if (c.kind === "pdf") c.images.dispose();
               return prev;
             }
             return c;

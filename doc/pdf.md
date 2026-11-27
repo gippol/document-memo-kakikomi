@@ -18,13 +18,14 @@ docling などで事前に .md に変換する案は採らなかった。
 ```
 PDF のバイト列（Rust の read_document_bytes）
   └─ src/lib/document.ts  loadOnce: kind === "pdf"
-       └─ src/lib/pdf.ts  pdfToHtml()  ← pdf.js は開くときだけ動的 import
-            ├─ ページごとに canvas に描く → PNG の blob URL（見た目）
-            ├─ ページごとに TextLayer → 透明な <span> の HTML（文字）
-            └─ HTML・本文テキスト・警告・ページ数・blob URL を返す
+       ├─ キャッシュのキー = sha256(バイト列の sha256 ＋ pdfCacheSeed())
+       └─ src/lib/pdf.ts  pdfToHtml(bytes, cache)  ← pdf.js は開くときだけ動的 import
+            ├─ 文字の層: キャッシュの text.json か、全ページの TextLayer → 透明な <span> の HTML（作ったら保存）
+            └─ HTML・本文テキスト・警告・ページ数と、ページ画像を求める images を返す
   └─ src/components/Viewer.tsx  HTML を描画（PowerPoint と同じ dangerouslySetInnerHTML）
        ├─ TextIndex（src/lib/dom.ts）で表示テキストを作る → 既存のアンカーの仕組みへ
        ├─ pageSpans で各ページのテキスト上の範囲を求める
+       ├─ 表示欄の近くのページだけ images.url(no) → img の src（キャッシュの p<N>.png か、canvas に描いて PNG に）
        └─ 左にページ一覧、ページ幅を表示欄に合わせる
 ```
 
@@ -34,7 +35,7 @@ PDF のバイト列（Rust の read_document_bytes）
 
 ```html
 <section class="pdf-page" data-page="2" style="--page-w:595;--page-h:842">
-  <img class="pdf-img" src="blob:…" alt="" draggable="false">
+  <img class="pdf-img" alt="" draggable="false">   ← src は表示するときに Viewer が入れる
   <div class="textLayer" style="--min-font-size: …; width: …; height: …">
     <span role="presentation" style="left: 77.59%; top: 45.73%; --font-height: 10.99px; --scale-x: 1.0025;">15</span>
     …
@@ -63,9 +64,26 @@ PDF のバイト列（Rust の read_document_bytes）
 - `RENDER_SCALE = 2`（144dpi 相当）で描く。表示の倍率は CSS で決まるので、拡大しすぎなければにじまない
 - **透明ありの canvas context を渡す**（`getContext("2d", { alpha: true })`）。pdf.js 既定の不透明な context では、WebView2 が文字をサブピクセル（ClearType）で描いてしまい、縮小表示で数字が青っぽくにじんだ
 - `page.render({ canvas: null, canvasContext, viewport })` の形にする。`canvas` を渡すと、pdf.js は `canvasContext` を無視して自分で不透明の context を作る
-- PNG の blob URL は、資料を閉じたり読み直したりしたときに `URL.revokeObjectURL` で解放する（`src/hooks/useWorkspace.ts` の `shownPdfUrls`）
-  - StrictMode で effect が 2 回走っても、表示中の URL は解放しないようにしてある
-  - 外部で PDF が更新されたときは、blob URL を除いた HTML と sha256 を比べる。同じなら新しく読んだほうの URL を捨てて、再描画しない
+- PNG のまま。WebP は変換の速さが PNG とほぼ同じ（1 ページ約 200ms）で、JPEG は速い（約 40ms）が文字がにじむ
+- **表示するページだけ描く**: 全ページを開くときに描くと、120 ページで数秒〜十数秒かかった（PNG への変換が約 6 割）。`Viewer.tsx` が IntersectionObserver で表示欄と上下 1 画面分にあるページを集め、表示欄の中心に近い順に 1 ページずつ `images.url(no)` で描く。描く前のページは白い枠だけ（大きさは CSS の `--page-w` / `--page-h` で決まるので、スクロール位置やアンカーは変わらない）
+- `images`（`createPageImages`）は、同じページを 1 度だけ描く。失敗したページは次に求められたときにやり直す
+- pdf.js の文書は、文字の層を作るときか、キャッシュに無いページを描くときに開き、資料を閉じるまで開いたままにする
+- 資料を閉じたり読み直したりしたら `images.dispose()` で blob URL と pdf.js の文書を解放する（`src/hooks/useWorkspace.ts` の `shownPdf`）
+  - StrictMode で effect が 2 回走っても、表示中のものは解放しないようにしてある
+  - 外部で PDF が更新されたときは、HTML と sha256 を比べる。同じなら新しく読んだほうを `dispose` して、再描画しない
+
+## キャッシュ
+
+2 回目以降に速く開くため、文字の層とページ画像をアプリのキャッシュフォルダに保存する。
+
+- 場所: `%LOCALAPPDATA%\com.shiryomemo.app\pdf-cache\<キー>\`。資料フォルダ（共有フォルダのことが多い）には置かない
+  - `text.json`: 文字の層まで（HTML・本文テキスト・警告・ページ数）
+  - `p<N>.png`: 一度表示したページの画像
+- キー: PDF のバイト列の sha256 と `pdfCacheSeed()`（pdf.js の版・`CACHE_FORMAT`・描画倍率）をつないだものの sha256。PDF が変われば別のキーになる。**文字の層の HTML・文字の正規化・描き方を変えたら `CACHE_FORMAT` を上げる**
+- 読み書きは Rust の `pdf_cache_get` / `pdf_cache_put`。中身はバイト列のまま渡す（`put` はキーと名前をヘッダーで渡す）。キーは 64 桁の 16 進、名前は `text.json` か `p<N>.png` しか受け付けない
+- 一時ファイルに書いてから置き換える。読めない・壊れている（形が違う）キャッシュは無視して作り直す。読み書きに失敗しても資料は開ける
+- 上限は合計 512MB。新しく PDF を開いて `text.json` を書いたときに、最後に開いた日時（`text.json` の更新日時。読むたびに今にする）が古い PDF のものから消す。いま開いた PDF のものは消さない
+- 結果（120 ページ・1.3MB の PDF、クリックしてから 1 ページ目が出るまで）: 変更前 4.5 秒 → 初回 0.76 秒、2 回目以降 0.33 秒
 
 ## 文字の正規化
 
@@ -120,5 +138,7 @@ PDF のバイト列（Rust の read_document_bytes）
 - スキャン画像だけの PDF は表示できるが、文字を選べない（警告を出す。全体メモは使える）
 - 段組みの PDF では、文字の層の順番が見た目の読み順とずれることがあり、選択や引用の文字の順番が不自然になる
 - パスワード付きの PDF は開けない（`PasswordException` のときはメッセージを出す）。フォーム・注釈・リンクは表示しない
-- 全ページを開くときに描く。ページ数の多い PDF は開くのが遅く、メモリも使う。必要になったら、見えているページだけを描く遅延描画にする
+- 文字の層は全ページを開くときに作る（アンカーに要るため）。キャッシュが無いと、ページ数に比例して時間がかかる
+- 一度描いたページの画像は、資料を閉じるまでメモリに残す（たくさんスクロールすると増える）
+- キャッシュにはページの画像と文字が残る。消すときはアプリを閉じて `pdf-cache` フォルダを消す
 - JBIG2 や JPEG 2000 の画像を含む PDF は未確認（wasm が CSP の下で動くか）

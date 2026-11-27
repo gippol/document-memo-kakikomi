@@ -2,6 +2,7 @@
 //!
 //! 非破壊の原則: 資料ファイルは読み取りのみ。書き込みは `<資料名>.notes.json` と、
 //! 保存ダイアログで利用者が選んだ議事録の `.md` に限定する。
+//! （ほかに、アプリの設定フォルダの許可リストと、アプリのキャッシュフォルダの PDF の描画結果を書く）
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -605,6 +606,147 @@ fn open_folder(app: AppHandle, state: State<FolderState>, root: String) -> Resul
     Ok(())
 }
 
+// ---------- PDF の描画結果のキャッシュ ----------
+
+/// PDF のページ画像と文字の層を、アプリのキャッシュフォルダ（Windows では `%LOCALAPPDATA%\<identifier>`）に置く。
+/// 資料フォルダ（共有フォルダのことが多い）には書かない。1 つの PDF の 1 つの版につき 1 つのフォルダ。
+const PDF_CACHE_DIR: &str = "pdf-cache";
+/// キャッシュ全体の上限。超えたら、最後に開いたのが古い PDF のものから消す
+const PDF_CACHE_LIMIT: u64 = 512 * 1024 * 1024;
+/// 1 ファイルの上限（A0 の図面を 144dpi で描いても数十 MB に収まる）
+const PDF_CACHE_MAX_FILE: usize = 64 * 1024 * 1024;
+const PDF_CACHE_TEXT: &str = "text.json";
+
+fn pdf_cache_base(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_cache_dir()
+        .map(|d| d.join(PDF_CACHE_DIR))
+        .map_err(|e| format!("キャッシュフォルダが見つかりません: {e}"))
+}
+
+/// キャッシュのファイルの場所。key は 64 桁の 16 進（小文字）、name は text.json か p<ページ番号>.png に限る
+/// （WebView から任意のパスを読み書きされないようにする）。
+fn pdf_cache_file(base: &Path, key: &str, name: &str) -> Result<PathBuf, String> {
+    let key_ok = key.len() == 64 && key.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    let page_ok = name
+        .strip_prefix('p')
+        .and_then(|n| n.strip_suffix(".png"))
+        .is_some_and(|n| (1..=6).contains(&n.len()) && !n.starts_with('0') && n.bytes().all(|b| b.is_ascii_digit()));
+    if !key_ok || !(name == PDF_CACHE_TEXT || page_ok) {
+        return Err(format!("キャッシュの名前が正しくありません: {key}/{name}"));
+    }
+    Ok(base.join(key).join(name))
+}
+
+/// キャッシュを読む。無ければ空を返す（ページ画像も文字の層も空にはならない）。
+/// 文字の層を読んだ（＝PDF を開き直した）ら、更新日時を今にして（古いものから消すときの「最後に開いた日時」）、
+/// 上限を超えた分を消す（前に開いていた間にページ画像が増えた分も、次に開いたときに片付く）。
+fn pdf_cache_read(base: &Path, key: &str, name: &str, limit: u64) -> Result<Vec<u8>, String> {
+    let path = pdf_cache_file(base, key, name)?;
+    match fs::read(&path) {
+        Ok(bytes) => {
+            if name == PDF_CACHE_TEXT {
+                if let Ok(f) = fs::File::options().write(true).open(&path) {
+                    let _ = f.set_modified(std::time::SystemTime::now());
+                }
+                evict_pdf_cache(base, key, limit);
+            }
+            Ok(bytes)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(format!("キャッシュを読めません: {e}")),
+    }
+}
+
+/// キャッシュに書く（一時ファイルに書いてから置き換えるので、読みかけの壊れたファイルは残らない）。
+/// 文字の層（＝新しく開いた PDF）を書いたときに、上限を超えた分を古いものから消す。
+fn pdf_cache_write(base: &Path, key: &str, name: &str, data: &[u8], limit: u64) -> Result<(), String> {
+    let path = pdf_cache_file(base, key, name)?;
+    if data.is_empty() || data.len() > PDF_CACHE_MAX_FILE {
+        return Err(format!("キャッシュに書けない大きさです: {} バイト", data.len()));
+    }
+    let dir = path.parent().ok_or("キャッシュの場所が正しくありません")?;
+    fs::create_dir_all(dir).map_err(|e| format!("キャッシュを書けません: {e}"))?;
+    // 同じページを同時に書いても混ざらないよう、一時ファイルの名前は書くたびに変える
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!("{name}.{}-{seq}.tmp", std::process::id()));
+    if let Err(e) = fs::write(&tmp, data).and_then(|_| fs::rename(&tmp, &path)) {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("キャッシュを書けません: {e}"));
+    }
+    if name == PDF_CACHE_TEXT {
+        evict_pdf_cache(base, key, limit);
+    }
+    Ok(())
+}
+
+/// キャッシュ全体が limit を超えていたら、最後に開いた日時（text.json の更新日時）が古い PDF のものから消す。
+/// keep（いま開いた PDF）は消さない。
+fn evict_pdf_cache(base: &Path, keep: &str, limit: u64) {
+    let Ok(entries) = fs::read_dir(base) else { return };
+    let mut dirs: Vec<(std::time::SystemTime, u64, PathBuf)> = Vec::new();
+    let mut total = 0u64;
+    for e in entries.flatten() {
+        let dir = e.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let size: u64 = fs::read_dir(&dir)
+            .map(|it| it.flatten().filter_map(|f| f.metadata().ok()).map(|m| m.len()).sum())
+            .unwrap_or(0);
+        total += size;
+        if e.file_name() == keep {
+            continue;
+        }
+        let used = fs::metadata(dir.join(PDF_CACHE_TEXT))
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        dirs.push((used, size, dir));
+    }
+    dirs.sort_by_key(|(used, _, _)| *used);
+    for (_, size, dir) in dirs {
+        if total <= limit {
+            break;
+        }
+        if fs::remove_dir_all(&dir).is_ok() {
+            total -= size;
+        }
+    }
+}
+
+#[tauri::command]
+async fn pdf_cache_get(app: AppHandle, key: String, name: String) -> Result<Response, String> {
+    let base = pdf_cache_base(&app)?;
+    // ファイルの読み書き（と古いものの削除）は、ほかのコマンドを待たせないよう別のスレッドで行う
+    tauri::async_runtime::spawn_blocking(move || pdf_cache_read(&base, &key, &name, PDF_CACHE_LIMIT))
+        .await
+        .map_err(|e| e.to_string())?
+        .map(Response::new)
+}
+
+/// 中身はバイト列のまま受け取る（JSON の数値の配列にすると大きい画像で遅い）。key と name はヘッダーで渡す。
+#[tauri::command]
+async fn pdf_cache_put(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(data) = request.body() else {
+        return Err("キャッシュの中身はバイト列で渡してください".into());
+    };
+    let header = |k: &str| {
+        request
+            .headers()
+            .get(k)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+            .ok_or_else(|| format!("{k} がありません"))
+    };
+    let (key, name) = (header("x-cache-key")?, header("x-cache-name")?);
+    let base = pdf_cache_base(&app)?;
+    let data = data.clone();
+    tauri::async_runtime::spawn_blocking(move || pdf_cache_write(&base, &key, &name, &data, PDF_CACHE_LIMIT))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -623,7 +765,9 @@ pub fn run() {
             delete_orphan_notes,
             save_minutes,
             pick_folder,
-            open_folder
+            open_folder,
+            pdf_cache_get,
+            pdf_cache_put
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -826,5 +970,72 @@ mod tests {
         assert!(!matches_on_disk(&p, Some("y")).unwrap());
         assert!(!matches_on_disk(&p, None).unwrap());
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn pdf_cache_file_accepts_only_known_names() {
+        let base = Path::new("C:/cache");
+        let key = "a".repeat(64);
+        assert!(pdf_cache_file(base, &key, "text.json").is_ok());
+        assert!(pdf_cache_file(base, &key, "p1.png").is_ok());
+        assert!(pdf_cache_file(base, &key, "p123456.png").is_ok());
+        for name in ["p0.png", "p01.png", "p.png", "p1234567.png", "p1.jpg", "../x", "p1.png/..", "text.json.tmp"] {
+            assert!(pdf_cache_file(base, &key, name).is_err(), "{name}");
+        }
+        for bad in ["..".to_string(), "A".repeat(64), "a".repeat(63), format!("{}/", "a".repeat(63))] {
+            assert!(pdf_cache_file(base, &bad, "text.json").is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn pdf_cache_round_trip_and_missing_is_empty() {
+        let base = temp_dir("pdf-cache");
+        let key = "b".repeat(64);
+        assert!(pdf_cache_read(&base, &key, "p1.png", PDF_CACHE_LIMIT).unwrap().is_empty());
+        pdf_cache_write(&base, &key, "p1.png", b"png", PDF_CACHE_LIMIT).unwrap();
+        assert_eq!(pdf_cache_read(&base, &key, "p1.png", PDF_CACHE_LIMIT).unwrap(), b"png");
+        // 一時ファイルは残らない
+        let names: Vec<_> = fs::read_dir(base.join(&key)).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(names, ["p1.png"]);
+        // 空・不正な名前は書かない
+        assert!(pdf_cache_write(&base, &key, "p2.png", b"", PDF_CACHE_LIMIT).is_err());
+        assert!(pdf_cache_write(&base, &key, "../evil", b"x", PDF_CACHE_LIMIT).is_err());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn pdf_cache_evicts_least_recently_opened_but_keeps_current() {
+        let base = temp_dir("pdf-cache-evict");
+        let (old, mid, new) = ("1".repeat(64), "2".repeat(64), "3".repeat(64));
+        let set_used = |key: &str, secs: u64| {
+            let f = fs::File::options().write(true).open(base.join(key).join("text.json")).unwrap();
+            f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs)).unwrap();
+        };
+        // 1 つ 100 バイト × 2 ファイル
+        for k in [&old, &mid] {
+            pdf_cache_write(&base, k, "text.json", &[0; 100], u64::MAX).unwrap();
+            pdf_cache_write(&base, k, "p1.png", &[0; 100], u64::MAX).unwrap();
+        }
+        set_used(&old, 1_000);
+        set_used(&mid, 2_000);
+        // mid を開き直す（読むと最後に開いた日時が今になる）→ old のほうが古い
+        pdf_cache_read(&base, &mid, "text.json", u64::MAX).unwrap();
+        pdf_cache_write(&base, &new, "p1.png", &[0; 100], u64::MAX).unwrap();
+        // 上限 500 バイト: 合計 600 → old（200）を消して 400
+        pdf_cache_write(&base, &new, "text.json", &[0; 100], 500).unwrap();
+        assert!(!base.join(&old).exists());
+        assert!(base.join(&mid).exists());
+        assert!(base.join(&new).exists());
+        // 上限 0 でも、いま開いた PDF は消さない
+        pdf_cache_write(&base, &new, "text.json", &[0; 100], 0).unwrap();
+        assert!(!base.join(&mid).exists());
+        assert!(base.join(&new).join("p1.png").exists());
+        // 開き直したとき（text.json を読んだとき）にも、上限を超えた分を消す
+        pdf_cache_write(&base, &old, "text.json", &[0; 100], u64::MAX).unwrap();
+        set_used(&old, 1_000);
+        pdf_cache_read(&base, &new, "text.json", 250).unwrap();
+        assert!(!base.join(&old).exists());
+        assert!(base.join(&new).exists());
+        let _ = fs::remove_dir_all(&base);
     }
 }
