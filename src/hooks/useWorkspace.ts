@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errMsg, NOTES_CONFLICT, type DocEntry, type OrphanNotes } from "../lib/api";
-import { CONFIG_FILE, DEFAULT_CONFIG, parseConfig, type FolderConfig } from "../lib/config";
+import { CONFIG_FILE, DEFAULT_CONFIG, parseConfig, type FolderConfig, type NoteTemplate } from "../lib/config";
 import { disposeDoc, loadDocument, type LoadedDoc } from "../lib/document";
 import type { PageSpan, SlideSpan } from "../lib/dom";
 import type { HeadingSpan } from "../lib/place";
@@ -39,6 +39,8 @@ export function useWorkspace({ onBeforeOpen }: Options) {
   const [headings, setHeadings] = useState<HeadingSpan[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
+  /** 全体メモのテンプレート（設定ファイルから。画面に出すので state にも持つ） */
+  const [templates, setTemplates] = useState<NoteTemplate[]>(DEFAULT_CONFIG.templates);
   /** 操作の結果のお知らせ（閉じるまで表示） */
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -62,12 +64,17 @@ export function useWorkspace({ onBeforeOpen }: Options) {
     let next = DEFAULT_CONFIG;
     try {
       const json = await api.readConfig(r);
-      if (json !== null) next = parseConfig(json);
-      setConfigError(null);
+      const parsed = json === null ? null : parseConfig(json);
+      if (parsed) next = parsed.config;
+      // 壊れた項目だけ既定値にしている
+      setConfigError(
+        parsed?.errors.length ? `設定ファイル ${CONFIG_FILE}: ${parsed.errors.join(" / ")}（その項目は既定の設定にしています）` : null,
+      );
     } catch (e) {
       setConfigError(`設定ファイル ${CONFIG_FILE}: ${errMsg(e)}（既定の設定で表示しています）`);
     }
     configRef.current = next;
+    setTemplates(next.templates);
   }, []);
 
   const docOptions = () => ({ docxHeadings: configRef.current.docxHeadings });
@@ -283,6 +290,7 @@ export function useWorkspace({ onBeforeOpen }: Options) {
     headings,
     error,
     configError,
+    templates,
     notice,
     dismissNotice: () => setNotice(null),
     relinkNotes,

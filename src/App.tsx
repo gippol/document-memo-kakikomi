@@ -96,6 +96,7 @@ export default function App() {
     headings,
     error,
     configError,
+    templates,
     notice,
     dismissNotice,
     relinkNotes,
@@ -614,6 +615,7 @@ export default function App() {
                 onAddFromSelection={startDraft}
                 onAddPlace={startPlaceDraft}
                 canAddPlace={canEdit}
+                templates={templates}
                 onDraftSave={saveDraft}
                 onDraftCancel={() => setDraft(null)}
                 onUpdate={updateFields}
