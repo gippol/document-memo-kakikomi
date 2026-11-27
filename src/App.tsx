@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileTree } from "./components/FileTree";
 import { MinutesDialog } from "./components/MinutesDialog";
 import { OrphanNotes } from "./components/OrphanNotes";
-import { NotesPanel, type NoteFilter, type NoteTarget, type SortMode } from "./components/NotesPanel";
+import { NotesPanel, type NoteFilter, type NoteTarget, type NoteView, type SortMode } from "./components/NotesPanel";
 import { FolderBoard, type BoardTab, type PickSupersede } from "./components/FolderBoard";
 import { SheetViewer, type CellSelection, type SheetViewerHandle } from "./components/SheetViewer";
 import { Viewer, type TextSelection, type ViewerHandle } from "./components/Viewer";
@@ -26,6 +26,7 @@ import {
 } from "./lib/noteViews";
 import { type Anchor, nextNoteId, NOTES_SUFFIX, parseNotesFile, serializeNotesFile } from "./lib/notesFile";
 import { createPlaceAnchor, placeOptions, type PlaceOption } from "./lib/place";
+import { inSession, listSessions, sessionOf } from "./lib/session";
 import { createCellAnchor, formatRef } from "./lib/sheet";
 import { supersedesOf } from "./lib/supersede";
 import { lastDeletedIndex, pushDeleted, removeNote, restoreNote, type DeletedNote } from "./lib/undo";
@@ -65,6 +66,8 @@ export default function App() {
   const [focusTick, setFocusTick] = useState(0);
   const [sortMode, setSortMode] = useState<SortMode>("position");
   const [filter, setFilter] = useState<NoteFilter>("all");
+  /** 一覧に出す会議の回（ノートの作成日）。null はすべての回 */
+  const [session, setSession] = useState<string | null>(null);
   const [minutesOpen, setMinutesOpen] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
   const [boardTab, setBoardTab] = useState<BoardTab>("tasks");
@@ -112,6 +115,8 @@ export default function App() {
       setPendingJump(null);
       setUndoToast(null);
       setSupersedeFor(null);
+      // 回は資料ごとに違うので、資料を替えたらすべての回に戻す
+      setSession(null);
     },
   });
   const { notesFile, notesError, saveState, saveError, conflictNotice, updateNotes } = notes;
@@ -123,8 +128,10 @@ export default function App() {
     () => buildNoteViews(notesFile, doc, docText, slides, pages, headings, (s, e) => viewerRef.current?.locate(s, e) ?? {}),
     [notesFile, docText, doc, slides, pages, headings],
   );
-  const sortedViews = useMemo(() => sortNoteViews(filterNoteViews(views, filter), sortMode), [views, filter, sortMode]);
-  const filterCounts = useMemo(() => countByFilter(views), [views]);
+  const sessions = useMemo(() => listSessions(views.map((v) => v.note)), [views]);
+  const sessionViews = useMemo(() => views.filter((v) => inSession(v.note, session)), [views, session]);
+  const sortedViews = useMemo(() => sortNoteViews(filterNoteViews(sessionViews, filter), sortMode), [sessionViews, filter, sortMode]);
+  const filterCounts = useMemo(() => countByFilter(sessionViews), [sessionViews]);
   const highlights = useMemo(() => textHighlights(views), [views]);
   const cellHighlights = useMemo(() => toCellHighlights(views), [views]);
   const staleSummary = useMemo(() => summarizeStale(views), [views]);
@@ -179,8 +186,9 @@ export default function App() {
     });
     setDraft(null);
     setActiveId(newId);
-    // 追加したノートが絞り込みで隠れないようにする
+    // 追加したノートが絞り込みで隠れないようにする（回は今日の回に切り替える）
     if (!matchesFilter(fieldsPatch(fields), filter)) setFilter("all");
+    if (!inSession({ createdAt: now }, session)) setSession(sessionOf({ createdAt: now }));
   };
 
   const updateFields = (id: string, fields: NoteFields) =>
@@ -236,7 +244,8 @@ export default function App() {
     setActiveId(d.note.id);
     setFocusTick((n) => n + 1);
     if (!matchesFilter(d.note, filter)) setFilter("all");
-  }, [deleted, currentPath, canEdit, updateNotes, filter]);
+    if (!inSession(d.note, session)) setSession(null);
+  }, [deleted, currentPath, canEdit, updateNotes, filter, session]);
 
   // フォルダを開き直したら履歴を捨てる
   useEffect(() => setDeleted([]), [root]);
@@ -322,6 +331,7 @@ export default function App() {
     if (!v) return;
     // 絞り込みで隠れていたら全部表示に戻す
     if (!matchesFilter(v.note, filter)) setFilter("all");
+    if (!inSession(v.note, session)) setSession(null);
     if (v.target) jumpTo(v.note.id);
     else {
       // 資料から見つからないノートは、一覧で選ぶだけ
@@ -386,13 +396,17 @@ export default function App() {
 
   /** クリックした位置を含むノートのうち、範囲が最も狭いものをアクティブにする */
   const activateSmallest = (size: (t: NoteTarget) => number | null) => {
-    let best: { id: string; n: number } | null = null;
+    let best: { v: NoteView; n: number } | null = null;
     for (const v of views) {
       const n = v.target ? size(v.target) : null;
-      if (n !== null && (!best || n < best.n)) best = { id: v.note.id, n };
+      if (n !== null && (!best || n < best.n)) best = { v, n };
     }
-    setActiveId(best?.id ?? null);
-    if (best) setFocusTick((t) => t + 1);
+    setActiveId(best?.v.note.id ?? null);
+    if (!best) return;
+    // ハイライトは絞り込みに関係なく全部出しているので、押したノートが一覧で隠れていたら絞り込みを外す
+    if (!matchesFilter(best.v.note, filter)) setFilter("all");
+    if (!inSession(best.v.note, session)) setSession(null);
+    setFocusTick((t) => t + 1);
   };
 
   const onClickOffset = (off: number) =>
@@ -611,6 +625,9 @@ export default function App() {
                 filter={filter}
                 onFilter={setFilter}
                 counts={filterCounts}
+                sessions={sessions}
+                session={session}
+                onSession={setSession}
                 onExportMinutes={() => setMinutesOpen(true)}
                 onAddFromSelection={startDraft}
                 onAddPlace={startPlaceDraft}
@@ -673,7 +690,7 @@ export default function App() {
       )}
 
       {minutesOpen && root && currentPath && (
-        <MinutesDialog root={root} docPath={currentPath} views={views} onClose={() => setMinutesOpen(false)} />
+        <MinutesDialog root={root} docPath={currentPath} views={views} session={session} onClose={() => setMinutesOpen(false)} />
       )}
     </div>
   );

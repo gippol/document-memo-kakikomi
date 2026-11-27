@@ -5,6 +5,7 @@
 import { collectFolderNotes, itemText, sourceLabel, type CurrentNotes, type FolderNote, type FolderNotes, type NotesFileEntry } from "./board";
 import { indentRest, oneLine } from "./minutes";
 import { formatDate } from "./noteMeta";
+import { sessionOf } from "./session";
 import { noteKey, resolveDoc, type DecisionLinks } from "./supersede";
 
 export type LedgerData = FolderNotes<FolderNote>;
@@ -22,10 +23,9 @@ export function collectDecisions(entries: NotesFileEntry[], current: CurrentNote
   return collectFolderNotes(entries, current, (i) => (i.note.kind === "decision" ? i : null));
 }
 
-/** 決めた日（作成日時が読めなければ記録された文字列の先頭 10 文字） */
+/** 決めた日（その決定を書いた会議の回） */
 export function decidedOn(item: FolderNote): string {
-  const d = new Date(item.note.createdAt);
-  return isNaN(d.getTime()) ? item.note.createdAt.slice(0, 10) : formatDate(d);
+  return sessionOf(item.note);
 }
 
 /** 検索用に文字をそろえる（全角英数・半角カナの違い、大文字小文字を無視する） */
