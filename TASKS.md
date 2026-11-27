@@ -34,7 +34,8 @@
 
 - [ ] **10. テスト・CI の整備**（Rust のテスト、`notesFile.ts` のテスト、GitHub Actions、ESLint）
   - 現状: テストは揃ってきた（vitest 約 200 件・`cargo test` 15 件、`notesFile.test.ts` もある）が、走らせるのは手元だけ。PR で確認が抜けると気づけない
-  - [ ] まず GitHub Actions で TypeScript 側の CI: PR とプッシュのたびに `npm ci` → `npm test` → `npx tsc --noEmit -p .`（`.github/workflows/ci.yml` を 1 つ置く。Windows でなく ubuntu で足りる。版と名前のずれも `appInfo.test.ts` で見つかる）
+  - [x] まず GitHub Actions で TypeScript 側の CI: PR とプッシュのたびに `npm ci` → `npm test` → `npx tsc --noEmit -p .`（`.github/workflows/ci.yml` を 1 つ置く。Windows でなく ubuntu で足りる。版と名前のずれも `appInfo.test.ts` で見つかる）
+    - 対応: `.github/workflows/ci.yml`。PR と main へのプッシュで ubuntu・Node 24。同じブランチで新しく走ったら古い実行は止める。ランナーは UTC だが、日付のテストは `TZ=UTC` でも通ることを確かめた
   - [ ] Rust の CI: `cargo test`・`cargo clippy`。Tauri のビルドに要るもの（ubuntu なら webkit2gtk など、または windows-latest）を入れる必要があり重いので、TypeScript 側の後
   - [ ] ESLint（React のフックの依存配列の漏れなど）。入れたら CI でも走らせる
   - [ ] 余裕があれば `npm run tauri build` でインストーラーが作れることも CI で確かめる（時間がかかるので main へのマージ時だけ）
