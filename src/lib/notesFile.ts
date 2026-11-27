@@ -1,5 +1,5 @@
 import type { TextAnchor } from "./anchor";
-import { isDueDate, isNoteKind, isPriority, type NoteKind, type Priority } from "./noteMeta";
+import { fieldsPatch, isDueDate, isNoteKind, isPriority, nextDoneAt, type NoteFields, type NoteKind, type Priority } from "./noteMeta";
 import { PLACE_SCOPES, type PlaceAnchor } from "./place";
 import { parseRef, type CellAnchor } from "./sheet";
 
@@ -22,6 +22,8 @@ export interface Note {
   priority?: Priority;
   /** 宿題は完了、質問は回答済み */
   done?: boolean;
+  /** 完了（回答済み）にした日時 ISO 8601（done のときだけ。この記録を始める前に完了にしたノートには無い） */
+  doneAt?: string;
   /** 決定のみ: この決定で置き換えた前の決定 */
   supersedes?: Supersedes;
   createdAt: string;
@@ -140,6 +142,21 @@ function isSupersedes(s: unknown): boolean {
   return isObj(s) && isStr(s.id) && !!s.id && isStr(s.doc) && !!s.doc && isStr(s.text);
 }
 
+/**
+ * ノートの種類・コメント・担当者・期限・優先度・完了状態を変える。
+ * 完了にした日時を記録し（未完了に戻すと消す）、置き換えのリンクは決定のときだけ残す
+ */
+export function withFields(n: Note, fields: NoteFields, now: string): Note {
+  const patch = fieldsPatch(fields);
+  return {
+    ...n,
+    ...patch,
+    doneAt: nextDoneAt(n, patch.done, now),
+    supersedes: patch.kind === "decision" ? n.supersedes : undefined,
+    updatedAt: now,
+  };
+}
+
 /** 表示・保存に必要な項目がそろったノートか */
 export function isNote(v: unknown): v is Note {
   if (!isObj(v)) return false;
@@ -148,6 +165,7 @@ export function isNote(v: unknown): v is Note {
   if (!optStr(v.assignee) || (v.due !== undefined && !isDueDate(v.due))) return false;
   if (v.priority !== undefined && !isPriority(v.priority)) return false;
   if (v.done !== undefined && typeof v.done !== "boolean") return false;
+  if (!optStr(v.doneAt)) return false;
   if (v.supersedes !== undefined && !isSupersedes(v.supersedes)) return false;
   const a = v.anchor;
   if (!isObj(a)) return false;
@@ -172,6 +190,7 @@ export function serializeNotesFile(file: NotesFile): string {
         due: n.due || undefined,
         priority: n.priority || undefined,
         done: n.done || undefined,
+        doneAt: (n.done && n.doneAt) || undefined,
         supersedes: n.supersedes ? { id: n.supersedes.id, doc: n.supersedes.doc, text: n.supersedes.text } : undefined,
         createdAt: n.createdAt,
         updatedAt: n.updatedAt,

@@ -25,7 +25,7 @@ import {
   summarizeStale,
   textHighlights,
 } from "./lib/noteViews";
-import { type Anchor, nextNoteId, NOTES_SUFFIX, parseNotesFile, serializeNotesFile } from "./lib/notesFile";
+import { type Anchor, nextNoteId, NOTES_SUFFIX, parseNotesFile, serializeNotesFile, withFields } from "./lib/notesFile";
 import { createPlaceAnchor, placeOptions, type PlaceOption } from "./lib/place";
 import { inSession, listSessions, sessionOf } from "./lib/session";
 import { createCellAnchor, formatRef } from "./lib/sheet";
@@ -196,15 +196,7 @@ export default function App() {
     updateNotes((f) => ({
       ...f,
       notes: f.notes.map((n) =>
-        n.id === id && !sameFields(fieldsOf(n), fields)
-          ? {
-              ...n,
-              ...fieldsPatch(fields),
-              // 置き換えのリンクは決定のときだけ持つ
-              supersedes: fields.kind === "decision" ? n.supersedes : undefined,
-              updatedAt: new Date().toISOString(),
-            }
-          : n,
+        n.id === id && !sameFields(fieldsOf(n), fields) ? withFields(n, fields, new Date().toISOString()) : n,
       ),
     }));
 
@@ -214,7 +206,7 @@ export default function App() {
       ...f,
       notes: f.notes.map((n) => {
         if (n.id !== id || !n.kind || !hasTask(n.kind)) return n;
-        return { ...n, ...fieldsPatch({ ...fieldsOf(n), done: !n.done }), updatedAt: new Date().toISOString() };
+        return withFields(n, { ...fieldsOf(n), done: !n.done }, new Date().toISOString());
       }),
     }));
 

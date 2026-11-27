@@ -107,6 +107,22 @@ describe("並べ替え・集計", () => {
     expect(cellHighlights(views)).toEqual([]);
   });
 
+  it("ハイライトは種類を持つ（マーカーの色分け。種類の無いノートはメモ）", () => {
+    const vs = buildNoteViews(
+      file([{ ...note("d", OLD, "前置き", "v1"), kind: "decision" }, note("m", OLD, "後書き", "v1")]),
+      md(OLD, "v1"),
+      OLD,
+      [],
+      [],
+      [],
+      locate,
+    );
+    expect(textHighlights(vs).map((h) => [h.id, h.kind])).toEqual([
+      ["d", "decision"],
+      ["m", "memo"],
+    ]);
+  });
+
   it("資料の更新で影響を受けたノートを数える", () => {
     expect(summarizeStale(views)).toEqual({ total: 1, moved: 0, fuzzy: 0, orphaned: 1 });
   });

@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { applyShorthand, fieldsPatch, isOverdue, normalizeFields, parseDue, priorityRank, sameFields, type NoteFields } from "./noteMeta";
+import {
+  applyShorthand,
+  daysLate,
+  doneAtLabel,
+  fieldsPatch,
+  isOverdue,
+  nextDoneAt,
+  normalizeFields,
+  parseDue,
+  priorityRank,
+  sameFields,
+  type NoteFields,
+} from "./noteMeta";
 
 const TODAY = new Date(2026, 10, 23); // 2026-11-23
 const memo = (comment: string): NoteFields => ({ kind: "memo", comment });
@@ -88,6 +100,35 @@ describe("優先度", () => {
 
   it("sameFields は優先度の違いも見る", () => {
     expect(sameFields({ kind: "action", comment: "x" }, { kind: "action", comment: "x", priority: "high" })).toBe(false);
+  });
+});
+
+describe("完了の記録", () => {
+  // 時差があっても同じ日になる時刻（UTC 03:00 = JST 12:00）
+  const AT = "2026-12-03T03:00:00.000Z";
+
+  it("完了にしたときだけ日時を記録し、完了のままなら前の値を保つ。未完了に戻すと消す", () => {
+    expect(nextDoneAt({}, true, AT)).toBe(AT);
+    expect(nextDoneAt({ done: true, doneAt: "2026-12-01T00:00:00.000Z" }, true, AT)).toBe("2026-12-01T00:00:00.000Z");
+    // 記録を始める前に完了にしたノートは、いつ完了したか分からないので記録しない
+    expect(nextDoneAt({ done: true }, true, AT)).toBeUndefined();
+    expect(nextDoneAt({ done: true, doneAt: AT }, false, AT)).toBeUndefined();
+    expect(nextDoneAt({ done: true, doneAt: AT }, undefined, AT)).toBeUndefined();
+  });
+
+  it("期限を過ぎてから完了にした日数", () => {
+    expect(daysLate("2026-12-01", AT)).toBe(2);
+    expect(daysLate("2026-12-03", AT)).toBe(0);
+    expect(daysLate("2026-12-10", AT)).toBe(0);
+    expect(daysLate(undefined, AT)).toBe(0);
+    expect(daysLate("2026-12-01", undefined)).toBe(0);
+    expect(daysLate("2026-12-01", "壊れた値")).toBe(0);
+  });
+
+  it("完了日の表示", () => {
+    expect(doneAtLabel(AT, TODAY)).toBe("12/3");
+    expect(doneAtLabel(undefined, TODAY)).toBeNull();
+    expect(doneAtLabel("壊れた値", TODAY)).toBeNull();
   });
 });
 

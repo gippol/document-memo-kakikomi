@@ -205,6 +205,31 @@ export function dueLabel(due: string, today: Date): string {
 
 // ---------- 状態 ----------
 
+/**
+ * 完了にした日時（ISO 8601）の次の値。完了にしたときは now、完了のままなら前の値（記録の無い古いノートは無いまま）、
+ * 未完了・完了を持たない種類なら undefined
+ */
+export function nextDoneAt(prev: { done?: boolean; doneAt?: string }, done: boolean | undefined, now: string): string | undefined {
+  if (!done) return undefined;
+  return prev.done ? prev.doneAt : now;
+}
+
+/** 完了にした日の表示（例: 11/28。記録が無ければ null） */
+export function doneAtLabel(doneAt: string | undefined, today: Date): string | null {
+  const d = doneAt ? new Date(doneAt) : null;
+  return d && !Number.isNaN(d.getTime()) ? dueLabel(formatDate(d), today) : null;
+}
+
+/** 期限を過ぎてから完了にした日数（この PC での日付で数える。期限内・記録が無ければ 0） */
+export function daysLate(due: string | undefined, doneAt: string | undefined): number {
+  if (!due || !doneAt || !isDueDate(due)) return 0;
+  const d = new Date(doneAt);
+  if (Number.isNaN(d.getTime())) return 0;
+  const [y, m, dd] = due.split("-").map(Number);
+  const done = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  return Math.max(0, Math.round((done.getTime() - new Date(y, m - 1, dd).getTime()) / 86400000));
+}
+
 /** 未完了の宿題・未回答の質問 */
 export function isOpen(m: NoteMeta): boolean {
   return hasTask(m.kind) && !m.done;

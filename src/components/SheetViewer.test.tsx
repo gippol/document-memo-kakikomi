@@ -115,7 +115,7 @@ describe("SheetViewer", () => {
   });
 
   it("シートのタブにノートの件数を表示する", () => {
-    mount({ highlights: [{ id: "note-001", sheet: "日程", range: { r1: 1, c1: 0, r2: 1, c2: 0 }, stale: false }] });
+    mount({ highlights: [{ id: "note-001", sheet: "日程", range: { r1: 1, c1: 0, r2: 1, c2: 0 }, stale: false, kind: "memo" }] });
     const tabs = [...container.querySelectorAll("button")].map((b) => b.textContent);
     expect(tabs).toContain("日程(1)");
   });
