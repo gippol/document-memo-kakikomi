@@ -81,6 +81,7 @@ describe("whereOf", () => {
     const text = (loc: object) => note({ anchor: { type: "text", quote: "q", prefix: "", suffix: "", start: 0, end: 1, sourceSha256: "x", ...loc } });
     expect(whereOf(text({ slide: 3, heading: "課題" }))).toBe("S3");
     expect(whereOf(text({ page: 4 }))).toBe("p.4");
+    expect(whereOf(text({ page: 4, heading: "3. 課題" }))).toBe("§ 3. 課題 p.4");
     expect(whereOf(note({ anchor: { type: "place", scope: "page", page: 2, quote: "p.2", sourceSha256: "x" } }))).toBe("p.2");
     expect(whereOf(text({ heading: "2. 予算", paragraph: 5 }))).toBe("§ 2. 予算 ¶5");
     expect(whereOf(text({ lineStart: 4, lineEnd: 6 }))).toBe("L4-6");

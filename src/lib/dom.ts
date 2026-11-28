@@ -173,10 +173,18 @@ export function pageSpans(root: Element, index: Pick<TextIndex, "offsetOf"> = { 
   }));
 }
 
-/** 見出し（h1〜h6）の文言と表示テキスト上の位置。文言は locateInHtml の heading と同じく 60 文字まで */
+/**
+ * 見出しの文言（60 文字まで）。PDF のしおりから作った見出しは、しおりの題名（data-title）を使う
+ * （行き先の文字は見出しの一部だけのことがあるため）
+ */
+export function headingText(h: Element): string {
+  return ((h as HTMLElement).dataset?.title || h.textContent || "").trim().slice(0, 60);
+}
+
+/** 見出し（h1〜h6）の文言と表示テキスト上の位置。文言は locateInHtml の heading と同じ */
 export function headingSpans(root: Element, index: Pick<TextIndex, "offsetOf"> = { offsetOf: (n, o) => offsetOf(root, n, o) }): HeadingSpan[] {
   return headingElements(root).map((h) => ({
-    text: h.textContent!.trim().slice(0, 60),
+    text: headingText(h),
     level: Number(h.tagName[1]),
     start: index.offsetOf(h, 0),
   }));
@@ -184,18 +192,29 @@ export function headingSpans(root: Element, index: Pick<TextIndex, "offsetOf"> =
 
 /** 文言のある見出しの要素（文書の順）。headingSpans と同じ並びなので、番号で対応が取れる */
 export function headingElements(root: Element): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6")).filter((h) => h.textContent?.trim());
+  return Array.from(root.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6")).filter((h) => headingText(h));
 }
 
-/** Range の位置を「段落番号＋直前の見出し」で表す（PowerPoint は「スライド番号＋そのタイトル」） */
+/** 直前の見出しの文言（node を含む見出しも含む。無ければ undefined） */
+function headingBefore(root: Element, node: Node): string | undefined {
+  let heading: string | undefined;
+  for (const h of headingElements(root)) {
+    const precedes = h.contains(node) || h.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING;
+    if (!precedes) break;
+    heading = headingText(h);
+  }
+  return heading || undefined;
+}
+
+/** Range の位置を「段落番号＋直前の見出し」で表す（PowerPoint は「スライド番号＋そのタイトル」、PDF は「ページ番号＋直前の見出し」） */
 export function locateInHtml(root: Element, range: Range): AnchorLocation {
   const node = range.startContainer;
   const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
   const block = el?.closest("[data-para]") as HTMLElement | null;
   const slide = el?.closest("section[data-slide]") as HTMLElement | null;
   const page = el?.closest("section[data-page]") as HTMLElement | null;
-  // PDF は見出しや段落の構造を持たないので、ページ番号だけで表す
-  if (page) return { page: Number(page.dataset.page) };
+  // PDF は段落の構造を持たないので、ページ番号と（構造・しおりから作った）直前の見出しで表す
+  if (page) return { page: Number(page.dataset.page), heading: headingBefore(root, node) };
   if (slide) {
     const title = slide.dataset.title || `スライド ${slide.dataset.slide}`;
     return {
@@ -205,14 +224,8 @@ export function locateInHtml(root: Element, range: Range): AnchorLocation {
       slideId: Number(slide.dataset.slideId) || undefined,
     };
   }
-  let heading: string | undefined;
-  for (const h of root.querySelectorAll("h1,h2,h3,h4,h5,h6")) {
-    const precedes = h.contains(node) || h.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING;
-    if (!precedes) break;
-    heading = h.textContent?.trim();
-  }
   return {
     paragraph: block ? Number(block.dataset.para) : undefined,
-    heading: heading ? heading.slice(0, 60) : undefined,
+    heading: headingBefore(root, node),
   };
 }

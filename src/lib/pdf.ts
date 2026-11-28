@@ -21,8 +21,12 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
  * 出力（img の src は Viewer が後から入れる）:
  * <section class="pdf-page" data-page="3" style="--page-w:595;--page-h:842">
  *   <img class="pdf-img" alt="">
- *   <div class="textLayer">…<span>文字</span>…</div>
+ *   <div class="textLayer">…<span>文字</span>…<h2 class="markedContent pdf-heading"><span>見出し</span></h2>…</div>
  * </section>
+ *
+ * 見出しは Word・Markdown と同じく h1〜h6 にする（ノートに直前の見出しを記録するため）。
+ * タグ付き PDF の構造（H1〜H6）に見出しがあればそれを、無ければしおり（アウトライン）の行き先の文字を見出しにする。
+ * しおりの見出しの文言はしおりの題名（data-title）。どちらも文字を包むだけなので、本文テキストは変わらない。
  */
 export interface PdfHtml extends PdfText {
   images: PageImages;
@@ -55,8 +59,8 @@ export interface PdfCache {
 const ASSET_BASE = `${import.meta.env.BASE_URL}pdfjs/`;
 /** ページ画像の解像度（1 = 72dpi。拡大表示でもにじまないよう 2 倍の 144dpi 相当で描く） */
 const RENDER_SCALE = 2;
-/** キャッシュの形式。文字の層の HTML・文字の正規化・ページ画像の描き方を変えたら上げる */
-const CACHE_FORMAT = 1;
+/** キャッシュの形式。文字の層の HTML・文字の正規化・ページ画像の描き方を変えたら上げる（2: 見出しを h1〜h6 に） */
+const CACHE_FORMAT = 2;
 const TEXT_CACHE = "text.json";
 
 GlobalWorkerOptions.workerSrc = workerUrl;
@@ -126,12 +130,13 @@ async function renderImage(page: PDFPageProxy): Promise<Blob> {
   return blob;
 }
 
-async function renderTextLayer(page: PDFPageProxy): Promise<{ html: string; text: string }> {
+async function renderTextLayer(page: PDFPageProxy): Promise<HTMLElement> {
   // 文字の位置はページに対する割合（%）で出るので、表示倍率は CSS（--total-scale-factor）で変えられる
   const container = document.createElement("div");
   container.className = "textLayer";
   const layer = new TextLayer({
-    textContentSource: await page.getTextContent(),
+    // 構造の見出しと対応を取るため、マークされた内容（span.markedContent#<id>）も出す
+    textContentSource: await page.getTextContent({ includeMarkedContent: true }),
     container,
     viewport: page.getViewport({ scale: 1 }),
   });
@@ -143,27 +148,200 @@ async function renderTextLayer(page: PDFPageProxy): Promise<{ html: string; text
     if (norm !== t.data) t.data = norm;
   }
   // pdf.js は文字の大きさの補正値（--min-font-size）を container に書くので、container ごと使う
-  return { html: container.outerHTML, text: container.textContent ?? "" };
+  return container;
 }
 
 async function buildText(pdf: PDFDocumentProxy): Promise<PdfText> {
-  const pages: PageParts[] = [];
-  const texts: string[] = [];
+  const pages: (Omit<PageParts, "textLayerHtml"> & { layer: HTMLElement; viewTop: number | null })[] = [];
+  let structHeadings = 0;
   for (let no = 1; no <= pdf.numPages; no++) {
     const page = await pdf.getPage(no);
     const layer = await renderTextLayer(page);
+    const tree = (await page.getStructTree().catch(() => null)) as StructNode | null;
+    structHeadings += markStructHeadings(layer, structHeadingNodes(tree));
     const [x0, y0, x1, y1] = page.view;
     const rotated = page.rotate % 180 !== 0;
     pages.push({
       no,
       width: rotated ? y1 - y0 : x1 - x0,
       height: rotated ? x1 - x0 : y1 - y0,
-      textLayerHtml: layer.html,
+      layer,
+      // しおりの行き先の高さ（PDF の座標）を文字の層の割合に直すための、ページの上端。回転したページは高さを使わない
+      viewTop: rotated ? null : y1,
     });
-    texts.push(layer.text);
     page.cleanup();
   }
-  return { html: pagesToHtml(pages), text: texts.join(""), warnings: textWarnings(texts), pageCount: pdf.numPages };
+  // 構造に見出しが無い PDF は、しおりを見出しにする
+  if (structHeadings === 0) {
+    const marks = await outlineMarks(pdf).catch((): OutlineMark[] => []);
+    for (const m of marks) {
+      const p = pages[m.page - 1];
+      if (!p) continue;
+      const topPct = m.top !== null && p.viewTop !== null ? ((p.viewTop - m.top) / p.height) * 100 : null;
+      markOutlineHeading(p.layer, { title: m.title, level: m.level, topPct });
+    }
+  }
+  const texts = pages.map((p) => {
+    stripMarkedContentIds(p.layer);
+    return p.layer.textContent ?? "";
+  });
+  const html = pagesToHtml(pages.map((p) => ({ no: p.no, width: p.width, height: p.height, textLayerHtml: p.layer.outerHTML })));
+  return { html, text: texts.join(""), warnings: textWarnings(texts), pageCount: pdf.numPages };
+}
+
+// ---------- 見出し ----------
+
+/** 構造の木の節（pdf.js の getStructTree の形） */
+export interface StructNode {
+  role?: string;
+  type?: string;
+  id?: string;
+  children?: StructNode[];
+}
+
+/** 構造の見出し 1 つ: 見出しの深さと、その文字の入ったマークされた内容の ID（文書の順） */
+export interface StructHeading {
+  level: number;
+  ids: string[];
+}
+
+const HEADING_ROLE = /^H([1-6])?$/;
+
+/** 構造の木から見出し（H1〜H6、深さの無い H は 1）を集める */
+export function structHeadingNodes(tree: StructNode | null | undefined): StructHeading[] {
+  const out: StructHeading[] = [];
+  const contentIds = (n: StructNode): string[] => (n.type === "content" && n.id ? [n.id] : (n.children ?? []).flatMap(contentIds));
+  const walk = (n: StructNode) => {
+    const m = n.role ? HEADING_ROLE.exec(n.role) : null;
+    if (m) {
+      out.push({ level: m[1] ? Number(m[1]) : 1, ids: contentIds(n) });
+      return;
+    }
+    (n.children ?? []).forEach(walk);
+  };
+  if (tree) walk(tree);
+  return out;
+}
+
+const hasText = (n: Node) => !!n.textContent?.trim();
+
+function makeHeading(level: number, title?: string): HTMLElement {
+  const h = document.createElement(`h${Math.min(6, Math.max(1, level))}`);
+  // 文字の層の span と同じく箱を作らない（index.css の .markedContent）。表示も文字の位置も変わらない
+  h.className = "markedContent pdf-heading";
+  if (title) h.dataset.title = title;
+  return h;
+}
+
+/**
+ * 要素たちを見出しで包む。文字の順を変えないよう、最初の要素から同じ親の中で続く要素だけを包む
+ * （間に挟まってよいのは文字の無いもの（改行など）だけ）
+ */
+function wrapRun(els: Element[], h: HTMLElement): boolean {
+  const first = els[0];
+  const parent = first?.parentNode;
+  if (!first || !parent) return false;
+  const set = new Set<Node>(els);
+  let last: Node = first;
+  for (let n = first.nextSibling; n; n = n.nextSibling) {
+    if (set.has(n)) last = n;
+    else if (hasText(n)) break;
+  }
+  parent.insertBefore(h, first);
+  for (let n: Node | null = first; n; ) {
+    const next: Node | null = n.nextSibling;
+    h.appendChild(n);
+    if (n === last) break;
+    n = next;
+  }
+  return true;
+}
+
+/** 文字の層の中で、構造の見出しの文字を h1〜h6 で包む。包んだ数を返す */
+export function markStructHeadings(layer: HTMLElement, heads: StructHeading[]): number {
+  const byId = new Map<string, Element>();
+  layer.querySelectorAll(".markedContent[id]").forEach((e) => byId.set(e.id, e));
+  let count = 0;
+  for (const head of heads) {
+    const els = head.ids
+      .map((id) => byId.get(id))
+      .filter((e): e is Element => !!e && hasText(e) && !e.closest(".pdf-heading"));
+    if (els.length > 0 && wrapRun(els, makeHeading(head.level))) count++;
+  }
+  return count;
+}
+
+/** 文字の層の、文字のある末端の span（文書の順） */
+function textSpans(layer: HTMLElement): HTMLElement[] {
+  return Array.from(layer.querySelectorAll<HTMLElement>("span")).filter((s) => !s.querySelector("span") && hasText(s));
+}
+
+/**
+ * しおりの行き先の文字を h1〜h6 で包み、見出しの文言をしおりの題名にする。
+ * topPct はページの上端からの割合（%）。行き先の高さ以降で一番上の文字、高さが分からなければページの最初の文字にする
+ */
+export function markOutlineHeading(layer: HTMLElement, mark: { title: string; level: number; topPct: number | null }): boolean {
+  const spans = textSpans(layer).filter((s) => !s.closest(".pdf-heading"));
+  if (spans.length === 0) return false;
+  let target = spans[0];
+  if (mark.topPct !== null) {
+    const top = (s: HTMLElement) => parseFloat(s.style.top);
+    const left = (s: HTMLElement) => parseFloat(s.style.left);
+    // 行き先は文字の上端より少し上を指すことが多いので、それより下で一番上（同じ高さなら左）の文字。少し上にずれた文字も対象にする
+    const below = spans.filter((s) => !Number.isNaN(top(s)) && top(s) >= mark.topPct! - 1);
+    if (below.length > 0) target = below.reduce((a, b) => (top(b) < top(a) || (top(b) === top(a) && left(b) < left(a)) ? b : a));
+  }
+  return wrapRun([target], makeHeading(mark.level, mark.title.trim().slice(0, 60)));
+}
+
+/** マークされた内容の ID は見出しの対応を取るためだけのものなので、保存する HTML からは消す */
+function stripMarkedContentIds(layer: HTMLElement) {
+  layer.querySelectorAll(".markedContent[id]").forEach((e) => e.removeAttribute("id"));
+}
+
+/** しおり 1 つ分の行き先 */
+export interface OutlineMark {
+  title: string;
+  level: number;
+  /** 1 始まりのページ番号 */
+  page: number;
+  /** 行き先の高さ（PDF の座標。下から）。分からなければ null */
+  top: number | null;
+}
+
+interface OutlineItem {
+  title: string;
+  dest: string | unknown[] | null;
+  items: OutlineItem[];
+}
+
+/** しおりを文書の順に平らにし、行き先のページと高さを求める（行き先の分からないものは除く） */
+async function outlineMarks(pdf: PDFDocumentProxy): Promise<OutlineMark[]> {
+  const outline = (await pdf.getOutline()) as OutlineItem[] | null;
+  const out: OutlineMark[] = [];
+  const walk = async (items: OutlineItem[], level: number) => {
+    for (const it of items) {
+      const dest = typeof it.dest === "string" ? await pdf.getDestination(it.dest).catch(() => null) : it.dest;
+      const page = Array.isArray(dest) ? await destPage(pdf, dest[0]).catch(() => null) : null;
+      if (page !== null && it.title?.trim()) out.push({ title: it.title, level, page, top: destTop(dest as unknown[]) });
+      await walk(it.items ?? [], level + 1);
+    }
+  };
+  await walk(outline ?? [], 1);
+  return out;
+}
+
+async function destPage(pdf: PDFDocumentProxy, ref: unknown): Promise<number | null> {
+  if (typeof ref === "number") return ref + 1;
+  if (ref && typeof ref === "object") return (await pdf.getPageIndex(ref as Parameters<PDFDocumentProxy["getPageIndex"]>[0])) + 1;
+  return null;
+}
+
+/** 行き先の高さ（XYZ・FitH・FitBH だけが持つ） */
+export function destTop(dest: unknown[]): number | null {
+  const kind = (dest[1] as { name?: string } | undefined)?.name;
+  const v = kind === "XYZ" ? dest[3] : kind === "FitH" || kind === "FitBH" ? dest[2] : null;
+  return typeof v === "number" ? v : null;
 }
 
 /**

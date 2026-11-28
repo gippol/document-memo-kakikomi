@@ -183,8 +183,9 @@ export function Viewer(props: Props) {
     const ps = pageSpans(bodyRef.current, index);
     setSlides(spans);
     setPages(ps);
-    const hs = spans.length > 0 || ps.length > 0 ? [] : headingSpans(bodyRef.current, index);
-    setToc(tocEntries(hs, index.text.length));
+    // PDF の見出し（構造・しおりから作ったもの）は全体メモの付け先を探すのに渡すが、目次は今まで通りページ一覧にする
+    const hs = spans.length > 0 ? [] : headingSpans(bodyRef.current, index);
+    setToc(ps.length > 0 ? [] : tocEntries(hs, index.text.length));
     setCurrentHeading(0);
     cbRef.current.onTextReady(index.text, spans, ps, hs);
     setTextVersion((v) => v + 1);
