@@ -168,11 +168,11 @@ export default function App() {
     sheetRef.current?.clearSelection();
   }, [selection, canEdit]);
 
-  /** 全体メモを書き始める。付け先は資料全体か、いま見ている場所（スライド・シート・見出しの節） */
+  /** 全体メモを書き始める。付け先は資料全体か、いま見ている場所（スライド・ページ・シート・見出しの節） */
   const startPlaceDraft = useCallback(() => {
     if (!doc || !canEdit) return;
     const sheet = doc.kind === "xlsx" ? sheetRef.current?.currentSheet() : null;
-    const here: PlaceOption | null = sheet ? { scope: "sheet", sheet } : (viewerRef.current?.currentPlace() ?? null);
+    const here: PlaceOption[] = sheet ? [{ scope: "sheet", sheet }] : (viewerRef.current?.currentPlaces() ?? []);
     setDraft({ kind: "place", quote: "", places: placeOptions(here) });
     setActiveId(null);
     clearSelection();
