@@ -24,6 +24,26 @@ export function tocEntries(headings: HeadingSpan[], textLength: number): TocEntr
   }));
 }
 
+/** PDF の左の一覧の 1 ページ分: ページと、そのページにある見出し（目次の項目） */
+export interface PageWithHeadings {
+  no: number;
+  entries: TocEntry[];
+}
+
+/** 目次の項目を、見出しの始まる位置のページに振り分ける（ページの順。見出しの無いページも出す） */
+export function tocByPage(pages: { no: number; start: number; end: number }[], entries: TocEntry[]): PageWithHeadings[] {
+  return pages.map((p) => ({ no: p.no, entries: entries.filter((e) => e.start >= p.start && e.start < p.end) }));
+}
+
+/** 要素の上端。PDF の見出しは箱を作らない（display: contents）ので、要素の矩形が空なら中身の範囲で測る */
+export function topOf(el: Element): number {
+  const r = el.getBoundingClientRect();
+  if (r.width > 0 || r.height > 0) return r.top;
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  return range.getBoundingClientRect().top;
+}
+
 /** 節ごとのノート数（ノートの開始位置で数える。最初の見出しより前のノートは数えない） */
 export function notesPerEntry(entries: TocEntry[], noteStarts: number[]): Map<number, number> {
   const m = new Map<number, number>();

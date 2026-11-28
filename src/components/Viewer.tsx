@@ -1,6 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { memo, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
+import { Fragment, memo, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { trimRange, type AnchorLocation } from "../lib/anchor";
@@ -9,7 +9,7 @@ import { headingElements, headingSpans, linesOfRange, locateInHtml, pageSpans, s
 import { NOTE_KINDS, type NoteKind } from "../lib/noteMeta";
 import type { HeadingSpan, PlaceOption } from "../lib/place";
 import { LS_KEYS, lsGet, lsSet } from "../lib/storage";
-import { lastAtOrAbove, notesPerEntry, tocEntries, type TocEntry } from "../lib/toc";
+import { lastAtOrAbove, notesPerEntry, tocByPage, tocEntries, topOf, type TocEntry } from "../lib/toc";
 
 export interface HighlightSpec {
   id: string;
@@ -183,9 +183,9 @@ export function Viewer(props: Props) {
     const ps = pageSpans(bodyRef.current, index);
     setSlides(spans);
     setPages(ps);
-    // PDF の見出し（構造・しおりから作ったもの）は全体メモの付け先を探すのに渡すが、目次は今まで通りページ一覧にする
+    // PDF の見出しは構造・しおりから作ったもの（pdf.ts）。左のページ一覧の中に目次として出す
     const hs = spans.length > 0 ? [] : headingSpans(bodyRef.current, index);
-    setToc(ps.length > 0 ? [] : tocEntries(hs, index.text.length));
+    setToc(tocEntries(hs, index.text.length));
     setCurrentHeading(0);
     cbRef.current.onTextReady(index.text, spans, ps, hs);
     setTextVersion((v) => v + 1);
@@ -376,7 +376,8 @@ export function Viewer(props: Props) {
     const line = sc.getBoundingClientRect().top + sc.clientHeight / 3;
     if (toc.length > 0) {
       setCurrentHeading(Math.max(0, headingAtLine()));
-      return;
+      // PDF はいまのページも示す
+      if (doc.kind !== "pdf") return;
     }
     if (slides.length === 0 && pages.length === 0) return;
     let cur = 1;
@@ -402,7 +403,7 @@ export function Viewer(props: Props) {
     if (!sc || !body) return -1;
     const line = sc.getBoundingClientRect().top + sc.clientHeight / 3;
     const hs = headingElements(body);
-    return lastAtOrAbove(hs.length, (i) => hs[i].getBoundingClientRect().top, line);
+    return lastAtOrAbove(hs.length, (i) => topOf(hs[i]), line);
   };
 
   const goHeading = (i: number) => {
@@ -411,7 +412,7 @@ export function Viewer(props: Props) {
     if (!sc || !h) return;
     jumpedRef.current = i;
     setCurrentHeading(i);
-    sc.scrollTo({ top: sc.scrollTop + h.getBoundingClientRect().top - sc.getBoundingClientRect().top - 12 });
+    sc.scrollTo({ top: sc.scrollTop + topOf(h) - sc.getBoundingClientRect().top - 12 });
   };
   /** 利用者が自分でスクロールし始めたら、位置から求めるのに戻す */
   const releaseJump = () => {
@@ -431,7 +432,9 @@ export function Viewer(props: Props) {
     if (!nav || !item) return;
     const n = nav.getBoundingClientRect();
     const r = item.getBoundingClientRect();
-    const header = nav.firstElementChild?.getBoundingClientRect().height ?? 0;
+    // 上に固定した「目次」の行（Word・Markdown）の下に見えるようにする。PDF の一覧には無い
+    const first = nav.firstElementChild;
+    const header = first?.classList.contains("sticky") ? first.getBoundingClientRect().height : 0;
     if (r.top < n.top + header) nav.scrollTop -= n.top + header - r.top;
     else if (r.bottom > n.bottom) nav.scrollTop += r.bottom - n.bottom;
   }, [currentHeading, tocOpen]);
@@ -440,6 +443,9 @@ export function Viewer(props: Props) {
     () => notesPerEntry(toc, highlights.map((h) => h.start)),
     [toc, highlights],
   );
+
+  /** PDF の左の一覧（ページと、そのページで始まる見出し）。スクロールのたびに振り分け直さない */
+  const pagesWithHeadings = useMemo(() => tocByPage(pages, toc), [pages, toc]);
 
   const notesPerSlide = useMemo(() => {
     const units: { no: number; start: number; end: number }[] = slides.length > 0 ? slides : pages;
@@ -545,18 +551,38 @@ export function Viewer(props: Props) {
   );
 
   if (doc.kind === "pdf") {
+    // 見出し（タグ付き PDF の構造かしおり）があれば、ページの下にそのページの見出しを並べて目次にする
+    const hasToc = toc.length > 0;
     return (
       <div className="flex h-full">
-        <nav aria-label="ページ一覧" className="w-20 shrink-0 overflow-auto border-r border-line py-1 text-xs">
-          {pages.map((p) => (
-            <button
-              key={p.no}
-              className={`flex w-full gap-1 px-2 py-0.5 text-left hover:bg-line ${p.no === currentSlide ? "text-accent" : ""}`}
-              onClick={() => goSlide(p.no)}
-            >
-              <span>p.{p.no}</span>
-              {notesPerSlide.get(p.no) ? <span className="ml-auto shrink-0 text-dim">({notesPerSlide.get(p.no)})</span> : null}
-            </button>
+        <nav
+          ref={tocNavRef}
+          aria-label={hasToc ? "ページと見出しの目次" : "ページ一覧"}
+          className={`${hasToc ? "w-52" : "w-20"} shrink-0 overflow-auto border-r border-line py-1 text-xs`}
+        >
+          {pagesWithHeadings.map((p) => (
+            <Fragment key={p.no}>
+              <button
+                className={`flex w-full gap-1 px-2 py-0.5 text-left hover:bg-line ${p.no === currentSlide ? "text-accent" : hasToc ? "text-dim" : ""}`}
+                onClick={() => goSlide(p.no)}
+              >
+                <span>p.{p.no}</span>
+                {notesPerSlide.get(p.no) ? <span className="ml-auto shrink-0 text-dim">({notesPerSlide.get(p.no)})</span> : null}
+              </button>
+              {p.entries.map((e) => (
+                <button
+                  key={e.index}
+                  data-toc={e.index}
+                  className={`flex w-full gap-1 py-0.5 pr-2 text-left hover:bg-line ${e.index === currentHeading ? "text-accent" : e.depth === 0 ? "text-bright" : ""}`}
+                  style={{ paddingLeft: 20 + Math.min(e.depth, 4) * 12 }}
+                  title={e.text}
+                  onClick={() => goHeading(e.index)}
+                >
+                  <span className="truncate">{e.text}</span>
+                  {notesPerHeading.get(e.index) ? <span className="ml-auto shrink-0 text-dim">({notesPerHeading.get(e.index)})</span> : null}
+                </button>
+              ))}
+            </Fragment>
           ))}
         </nav>
         {view}
