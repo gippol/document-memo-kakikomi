@@ -77,15 +77,17 @@ export function whereOf(note: Note): string | null {
   }
   if (a.type === "cell") return `${a.sheet}!${a.ref}`;
   if (a.slide !== undefined) return `S${a.slide}`;
-  if (a.page !== undefined) return `p.${a.page}`;
+  // PDF はページ番号、Markdown は行、Word は段落。どれも直前の見出しを前に付ける
   const loc =
-    a.lineStart !== undefined
-      ? a.lineEnd && a.lineEnd !== a.lineStart
-        ? `L${a.lineStart}-${a.lineEnd}`
-        : `L${a.lineStart}`
-      : a.paragraph !== undefined
-        ? `¶${a.paragraph}`
-        : null;
+    a.page !== undefined
+      ? `p.${a.page}`
+      : a.lineStart !== undefined
+        ? a.lineEnd && a.lineEnd !== a.lineStart
+          ? `L${a.lineStart}-${a.lineEnd}`
+          : `L${a.lineStart}`
+        : a.paragraph !== undefined
+          ? `¶${a.paragraph}`
+          : null;
   return [a.heading && `§ ${a.heading}`, loc].filter(Boolean).join(" ") || null;
 }
 

@@ -1,6 +1,112 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { createPageImages, normalizePdfText, pagesToHtml, parseTextCache, textWarnings, type PdfCache } from "./pdf";
+import {
+  createPageImages,
+  destTop,
+  markOutlineHeading,
+  markStructHeadings,
+  normalizePdfText,
+  pagesToHtml,
+  parseTextCache,
+  structHeadingNodes,
+  textWarnings,
+  type PdfCache,
+} from "./pdf";
+
+/** pdf.js の TextLayer（includeMarkedContent）の出力に似せた文字の層 */
+function layerOf(html: string): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "textLayer";
+  el.innerHTML = html;
+  return el;
+}
+
+describe("PDF の見出し", () => {
+  it("構造の木から見出し（H1〜H6・H）と、その下の内容の ID を集める", () => {
+    const tree = {
+      role: "Root",
+      children: [
+        {
+          role: "Document",
+          children: [
+            { role: "H1", children: [{ type: "content", id: "p2R_mc0" }, { role: "NonStruct", children: [{ type: "content", id: "p2R_mc6" }] }] },
+            { role: "P", children: [{ type: "content", id: "p2R_mc7" }] },
+            { role: "H2", children: [{ role: "NonStruct", children: [{ type: "content", id: "p2R_mc8" }] }] },
+            { role: "H", children: [{ type: "content", id: "p2R_mc9" }] },
+            { role: "Table", children: [{ role: "TH", children: [{ type: "content", id: "p2R_mc1" }] }] },
+          ],
+        },
+      ],
+    };
+    expect(structHeadingNodes(tree)).toEqual([
+      { level: 1, ids: ["p2R_mc0", "p2R_mc6"] },
+      { level: 2, ids: ["p2R_mc8"] },
+      { level: 1, ids: ["p2R_mc9"] },
+    ]);
+    expect(structHeadingNodes(null)).toEqual([]);
+  });
+
+  it("構造の見出しの文字を h1〜h6 で包む。文字の順と本文テキストは変えない", () => {
+    const layer = layerOf(
+      '<span class="markedContent" id="p2R_mc0"></span>' +
+        '<span class="markedContent" id="p2R_mc6"><span>週次報告</span></span><br>' +
+        '<span class="markedContent" id="p2R_mc7"><span>作成: 企画</span></span>' +
+        '<span class="markedContent" id="p2R_mc8"><span>1. 今週の</span></span><br>' +
+        '<span class="markedContent" id="p2R_mc9"><span>進捗</span></span>' +
+        '<span class="markedContent" id="p2R_mc10"><span>本文</span></span>',
+    );
+    const before = layer.textContent;
+    const n = markStructHeadings(layer, [
+      { level: 1, ids: ["p2R_mc0", "p2R_mc6"] },
+      { level: 2, ids: ["p2R_mc8", "p2R_mc9"] },
+      { level: 3, ids: ["存在しない"] },
+    ]);
+    expect(n).toBe(2);
+    expect(layer.textContent).toBe(before);
+    const hs = [...layer.querySelectorAll("h1,h2,h3")];
+    expect(hs.map((h) => [h.tagName, h.textContent, h.className])).toEqual([
+      ["H1", "週次報告", "markedContent pdf-heading"],
+      // 間の改行（文字が無い）は一緒に包む
+      ["H2", "1. 今週の進捗", "markedContent pdf-heading"],
+    ]);
+  });
+
+  it("構造の見出しの内容が離れているときは、最初の続いている部分だけを包む（文字の順を変えない）", () => {
+    const layer = layerOf(
+      '<span class="markedContent" id="a"><span>見出し</span></span>' +
+        '<span class="markedContent" id="b"><span>本文</span></span>' +
+        '<span class="markedContent" id="c"><span>続き</span></span>',
+    );
+    markStructHeadings(layer, [{ level: 2, ids: ["a", "c"] }]);
+    expect(layer.textContent).toBe("見出し本文続き");
+    expect(layer.querySelector("h2")?.textContent).toBe("見出し");
+  });
+
+  it("しおりの行き先の高さ以降で一番上の文字を包み、文言はしおりの題名にする", () => {
+    const layer = layerOf(
+      '<span style="left: 10%; top: 5%">表題</span>' +
+        '<span style="left: 40%; top: 30%">課題</span>' +
+        '<span style="left: 10%; top: 30%">3.</span>' +
+        '<span style="left: 10%; top: 50%">本文</span>',
+    );
+    expect(markOutlineHeading(layer, { title: " 3. 課題と相談 ", level: 2, topPct: 29.5 })).toBe(true);
+    const h = layer.querySelector<HTMLElement>("h2")!;
+    expect(h.textContent).toBe("3.");
+    expect(h.dataset.title).toBe("3. 課題と相談");
+    expect(layer.textContent).toBe("表題課題3.本文");
+    // 高さが分からなければページの最初の文字。包んだ文字は二度包まない
+    expect(markOutlineHeading(layer, { title: "表題", level: 1, topPct: null })).toBe(true);
+    expect(layer.querySelector<HTMLElement>("h1")?.textContent).toBe("表題");
+    expect(markOutlineHeading(layerOf(""), { title: "x", level: 1, topPct: null })).toBe(false);
+  });
+
+  it("しおりの行き先の高さ（XYZ・FitH・FitBH）", () => {
+    expect(destTop([{}, { name: "XYZ" }, 72, 700, 0])).toBe(700);
+    expect(destTop([{}, { name: "FitH" }, 500])).toBe(500);
+    expect(destTop([{}, { name: "Fit" }])).toBeNull();
+    expect(destTop([{}, { name: "XYZ" }, null, null, null])).toBeNull();
+  });
+});
 
 describe("pdf", () => {
   it("ページごとに section を作り、画像（src は後から入れる）と文字の層を入れる", () => {

@@ -66,8 +66,8 @@ export function buildNoteViews(
             lineStart: note.anchor.lineStart,
             lineEnd: note.anchor.lineEnd,
             paragraph: note.anchor.paragraph,
-            // 見出しを記録していなかった頃の Markdown のノートは、今の資料から求める
-            heading: note.anchor.heading ?? (doc.kind === "markdown" ? locate(r.start, r.end).heading : undefined),
+            // 見出しを記録していなかった頃の Markdown・PDF のノートは、今の資料から求める
+            heading: note.anchor.heading ?? (doc.kind === "markdown" || doc.kind === "pdf" ? locate(r.start, r.end).heading : undefined),
             slide: note.anchor.slide,
             slideId: note.anchor.slideId,
             page: note.anchor.page,

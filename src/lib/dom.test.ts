@@ -121,4 +121,24 @@ describe("TextIndex", () => {
     expect(pageSpans(root, index)).toEqual(pageSpans(root));
     expect(locateInHtml(root, index.rangeAt(3, 5)!)).toEqual({ page: 2 });
   });
+
+  it("PDF: 構造・しおりから作った見出しを、直前の見出しとして記録する（しおりの見出しは題名を使う）", () => {
+    const root = mount(
+      '<section class="pdf-page" data-page="1"><div class="textLayer">' +
+        '<span>前書き</span><h1 class="markedContent pdf-heading"><span>1. 進捗</span></h1><span>本文A</span></div></section>' +
+        '<section class="pdf-page" data-page="2"><div class="textLayer">' +
+        '<span>本文B</span><h2 class="markedContent pdf-heading" data-title="2. 課題と相談"><span>2. 課</span></h2><span>本文C</span></div></section>',
+    );
+    const index = new TextIndex(root);
+    const at = (s: string) => locateInHtml(root, index.rangeAt(index.text.indexOf(s), index.text.indexOf(s) + s.length)!);
+    expect(at("前書き")).toEqual({ page: 1, heading: undefined });
+    expect(at("本文A")).toEqual({ page: 1, heading: "1. 進捗" });
+    // ページをまたいでも直前の見出し
+    expect(at("本文B")).toEqual({ page: 2, heading: "1. 進捗" });
+    expect(at("本文C")).toEqual({ page: 2, heading: "2. 課題と相談" });
+    expect(headingSpans(root, index).map((h) => [h.text, h.level])).toEqual([
+      ["1. 進捗", 1],
+      ["2. 課題と相談", 2],
+    ]);
+  });
 });
