@@ -23,6 +23,6 @@ describe("アプリの名前と版の表記", () => {
   });
   it("実行ファイル名と識別子は英数字のまま（変えるとアプリのデータの置き場所やドライバが変わる）", () => {
     expect(tauriConf.mainBinaryName).toBe("document-memo-kakikomi");
-    expect(tauriConf.identifier).toBe("com.shiryomemo.app");
+    expect(tauriConf.identifier).toBe("com.document-memo-kakikomi.app");
   });
 });

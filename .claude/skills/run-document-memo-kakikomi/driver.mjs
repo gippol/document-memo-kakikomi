@@ -115,7 +115,7 @@ async function waitReady(timeoutSec) {
  * open_folder は一覧に無いフォルダを開かないので、デモフォルダはここで足しておく
  */
 function allowFolder(folder) {
-  const file = join(process.env.APPDATA, "com.shiryomemo.app", "allowed-folders.json");
+  const file = join(process.env.APPDATA, "com.document-memo-kakikomi.app", "allowed-folders.json");
   let list = [];
   try {
     list = JSON.parse(readFileSync(file, "utf8"));
