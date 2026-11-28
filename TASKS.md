@@ -198,7 +198,7 @@
   - [x] 見えているページだけ描く（文字の層はアンカーのため全ページ先に作る。描く前のページは大きさだけ取った枠にする）
     - 対応: 表示欄と上下 1 画面分のページだけ、中心に近い順に 1 ページずつ描く（`Viewer.tsx` の IntersectionObserver、`pdf.ts` の `createPageImages`）
   - [x] 描いた結果をキャッシュする（ファイルの sha256 と描画倍率をキーに、アプリのキャッシュフォルダへ。資料フォルダには置かない。容量の上限と古いものの削除）
-    - 対応: `%LOCALAPPDATA%\com.shiryomemo.app\pdf-cache\<キー>\` に文字の層（`text.json`）とページ画像（`p<N>.png`）。キーは PDF のバイト列の sha256 ＋ pdf.js の版・形式・描画倍率。合計 512MB を超えたら、最後に開いたのが古い PDF から消す（Rust の `pdf_cache_get` / `pdf_cache_put`）
+    - 対応: `%LOCALAPPDATA%\com.document-memo-kakikomi.app\pdf-cache\<キー>\` に文字の層（`text.json`）とページ画像（`p<N>.png`）。キーは PDF のバイト列の sha256 ＋ pdf.js の版・形式・描画倍率。合計 512MB を超えたら、最後に開いたのが古い PDF から消す（Rust の `pdf_cache_get` / `pdf_cache_put`）
     - 結果（120 ページ、1 ページ目が出るまで）: 4.5 秒 → 初回 0.76 秒・2 回目以降 0.33 秒
   - [ ] ~~PNG の代わりに WebP にして、変換を速く・小さくする~~ → 見送り。測ると WebP の変換は PNG とほぼ同じ速さ（1 ページ約 200ms）だった。JPEG は速い（約 40ms）が文字がにじむ
 - [x] **45. PowerPoint の図が中心のスライドの見た目**

@@ -76,7 +76,7 @@ PDF のバイト列（Rust の read_document_bytes）
 
 2 回目以降に速く開くため、文字の層とページ画像をアプリのキャッシュフォルダに保存する。
 
-- 場所: `%LOCALAPPDATA%\com.shiryomemo.app\pdf-cache\<キー>\`。資料フォルダ（共有フォルダのことが多い）には置かない
+- 場所: `%LOCALAPPDATA%\com.document-memo-kakikomi.app\pdf-cache\<キー>\`。資料フォルダ（共有フォルダのことが多い）には置かない
   - `text.json`: 文字の層まで（HTML・本文テキスト・警告・ページ数）
   - `p<N>.png`: 一度表示したページの画像
 - キー: PDF のバイト列の sha256 と `pdfCacheSeed()`（pdf.js の版・`CACHE_FORMAT`・描画倍率）をつないだものの sha256。PDF が変われば別のキーになる。**文字の層の HTML・文字の正規化・描き方を変えたら `CACHE_FORMAT` を上げる**

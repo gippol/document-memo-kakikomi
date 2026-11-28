@@ -123,8 +123,8 @@ npm run build
 - **保存ダイアログは `shot` に写らない**（WebView の外）。`front` → `desktop-shot`。キーを送る前に `dialog` がダイアログを前面に出すので、Enter がアプリの textarea に入ることはない。
 - **ネイティブのダイアログを開いたままにしない。** `save_minutes` はダイアログを待ち続ける。`dialog "議事録を保存" "{ESC}"` で閉じる。
 - **PDF の文字は細かい span に分かれる**（フォントの切り替わりで 1 文字ずつのこともある）ので、`select` で見つからないことが多い。`node $D eval "[...document.querySelectorAll('section[data-page=\"2\"] .textLayer span')].map(s=>s.textContent).join(' | ')"` で区切りを見て、1 つの span 内の文字を選ぶか、`eval` で 2 つの span にまたがる Range を作って `getSelection().addRange(r)` する。デモフォルダに PDF が無ければ `samples/週次報告.pdf` をコピーする（`demo-reset` はノートが消える）
-- **PDF は 2 回目からキャッシュ（`%LOCALAPPDATA%\com.shiryomemo.app\pdf-cache\`）を使う。** 初めて開くときの速さや描画を確かめるときは、その PDF のキャッシュ（中身の同じ PDF なら同じフォルダ）を消してから開く。ページ画像は表示欄の近くのページにしか入らない（`img.pdf-img[src]` で確かめる）
-- **開けるのは「資料フォルダを開く」で選んだことのあるフォルダだけ。** 一覧は `%APPDATA%\com.shiryomemo.app\allowed-folders.json`（`open_folder` はここに無いフォルダを断る）。`demo` はデモフォルダをこの一覧に足してから開く。`restore` で戻した前回のフォルダが一覧に無いと「もう一度選んでください」と出る。
+- **PDF は 2 回目からキャッシュ（`%LOCALAPPDATA%\com.document-memo-kakikomi.app\pdf-cache\`）を使う。** 初めて開くときの速さや描画を確かめるときは、その PDF のキャッシュ（中身の同じ PDF なら同じフォルダ）を消してから開く。ページ画像は表示欄の近くのページにしか入らない（`img.pdf-img[src]` で確かめる）
+- **開けるのは「資料フォルダを開く」で選んだことのあるフォルダだけ。** 一覧は `%APPDATA%\com.document-memo-kakikomi.app\allowed-folders.json`（`open_folder` はここに無いフォルダを断る）。`demo` はデモフォルダをこの一覧に足してから開く。`restore` で戻した前回のフォルダが一覧に無いと「もう一度選んでください」と出る。
 - **フォルダ選択ダイアログ（資料フォルダを開く）には `dialog` の SendKeys が効かない**（`{ESC}` は効く）。UI Automation で ID 1152 の欄のハンドルを取り、WM_SETTEXT でパスを入れ、ID 1（Select Folder）に BM_CLICK を送る。
 - **`click` で開いたクリップボードのコピーは本物の Windows のクリップボードを上書きする。**
 - **Rust を変更すると `tauri dev` がアプリを自動で再起動する**（CDP の接続先も変わる）。`node $D wait` で待ってから続ける。

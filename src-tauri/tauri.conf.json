@@ -3,7 +3,7 @@
   "productName": "資料メモ かきこみ",
   "mainBinaryName": "document-memo-kakikomi",
   "version": "0.2.0",
-  "identifier": "com.shiryomemo.app",
+  "identifier": "com.document-memo-kakikomi.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
