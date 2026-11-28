@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AuthorSetting } from "./components/AuthorSetting";
 import { FileTree } from "./components/FileTree";
 import { MinutesDialog } from "./components/MinutesDialog";
 import { OrphanNotes } from "./components/OrphanNotes";
@@ -9,6 +10,7 @@ import { Viewer, type TextSelection, type ViewerHandle } from "./components/View
 import { usePaneLayout, PANE_MIN } from "./hooks/usePaneLayout";
 import type { SaveState } from "./hooks/useNotesStore";
 import { useFolderNotes } from "./hooks/useFolderNotes";
+import { useAuthor } from "./hooks/useAuthor";
 import { useWorkspace } from "./hooks/useWorkspace";
 import { api, errMsg, NOTES_CONFLICT } from "./lib/api";
 import { collectBoard, dueAlertMessage, dueAlert, setNoteDone, type BoardItem, type FolderNote } from "./lib/board";
@@ -121,6 +123,7 @@ export default function App() {
     },
   });
   const { notesFile, notesError, saveState, saveError, conflictNotice, updateNotes } = notes;
+  const { author, setting: authorSetting, gitName, setSetting: setAuthorSetting } = useAuthor(root);
   const folderNotes = useFolderNotes(root, boardOpen || supersedeFor !== null, currentPath, notesFile);
 
   // ---------- アンカー解決 ----------
@@ -183,7 +186,7 @@ export default function App() {
     let newId = "";
     updateNotes((f) => {
       newId = nextNoteId(f.notes, f.invalid);
-      return { ...f, notes: [...f.notes, { id: newId, ...fieldsPatch(fields), createdAt: now, updatedAt: now, anchor }] };
+      return { ...f, notes: [...f.notes, { id: newId, ...fieldsPatch(fields), author, createdAt: now, updatedAt: now, anchor }] };
     });
     setDraft(null);
     setActiveId(newId);
@@ -196,7 +199,7 @@ export default function App() {
     updateNotes((f) => ({
       ...f,
       notes: f.notes.map((n) =>
-        n.id === id && !sameFields(fieldsOf(n), fields) ? withFields(n, fields, new Date().toISOString()) : n,
+        n.id === id && !sameFields(fieldsOf(n), fields) ? withFields(n, fields, new Date().toISOString(), author) : n,
       ),
     }));
 
@@ -206,7 +209,7 @@ export default function App() {
       ...f,
       notes: f.notes.map((n) => {
         if (n.id !== id || !n.kind || !hasTask(n.kind)) return n;
-        return withFields(n, { ...fieldsOf(n), done: !n.done }, new Date().toISOString());
+        return withFields(n, { ...fieldsOf(n), done: !n.done }, new Date().toISOString(), author);
       }),
     }));
 
@@ -272,14 +275,14 @@ export default function App() {
     const now = new Date().toISOString();
     if (item.docPath === currentPath) {
       if (!canEdit) return "この資料のノートは今は編集できません";
-      updateNotes((f) => setNoteDone(f, item.note.id, done, now).file);
+      updateNotes((f) => setNoteDone(f, item.note.id, done, now, author).file);
       return null;
     }
     if (!root) return null;
     try {
       const json = await api.readNotes(root, item.docPath);
       if (json === null) return `${item.docPath}${NOTES_SUFFIX} が見つかりません`;
-      const r = setNoteDone(parseNotesFile(json, item.docPath), item.note.id, done, now);
+      const r = setNoteDone(parseNotesFile(json, item.docPath), item.note.id, done, now, author);
       if (!r.found) return "ノートが見つかりません（外部で変更・削除された可能性があります）";
       await api.writeNotes(root, item.docPath, serializeNotesFile(r.file), json);
       return null;
@@ -473,9 +476,11 @@ export default function App() {
           BOARD
         </button>
         <span className="truncate text-bright">{currentPath ?? "--"}</span>
+        <span className="ml-auto" />
+        <AuthorSetting author={author} setting={authorSetting} gitName={gitName} onChange={setAuthorSetting} />
         {currentPath && (
           <span
-            className={`ml-auto shrink-0 ${saveState === "error" || saveState === "pending" ? "text-bright" : "text-dim"}`}
+            className={`shrink-0 ${saveState === "error" || saveState === "pending" ? "text-bright" : "text-dim"}`}
             title={saveError ?? (notesFile ? `${currentPath}${NOTES_SUFFIX}` : "最初のノートを追加すると作成されます")}
           >
             {SAVE_LABEL[saveState]}

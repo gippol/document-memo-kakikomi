@@ -3,6 +3,7 @@
  * フォルダ内のすべてのノートファイルから未完了の宿題・未回答の質問を集め、担当者別・期限順に並べて集計する。
  * 資料を開かずに作るので、位置はノートに記録してある情報（スライド番号・見出し・行・段落・セル）で表す。
  */
+import { nextDoneBy } from "./author";
 import { indentRest, oneLine, taskMeta } from "./minutes";
 import { dueLabel, formatDate, isOpen, isOverdue, nextDoneAt, priorityRank, PRIORITY_LABEL, type Priority } from "./noteMeta";
 import { parseNotesFile, type Note, type NotesFile } from "./notesFile";
@@ -283,16 +284,16 @@ export const BOARD_TITLE: Record<BoardKind, string> = {
 // ---------- 完了・回答済みにする ----------
 
 /**
- * ノートファイルの中の宿題・質問を完了（質問は回答済み）にする / 戻す。
+ * ノートファイルの中の宿題・質問を完了（質問は回答済み）にする / 戻す。by は完了にした人。
  * 宿題・質問でないノート・見つからないノートはそのまま（found: false）
  */
-export function setNoteDone(file: NotesFile, id: string, done: boolean, now: string): { file: NotesFile; found: boolean } {
+export function setNoteDone(file: NotesFile, id: string, done: boolean, now: string, by?: string): { file: NotesFile; found: boolean } {
   let found = false;
   const notes = file.notes.map((n) => {
     if (n.id !== id || (n.kind !== "action" && n.kind !== "question")) return n;
     found = true;
     if (!!n.done === done) return n;
-    return { ...n, done: done || undefined, doneAt: nextDoneAt(n, done, now), updatedAt: now };
+    return { ...n, done: done || undefined, doneAt: nextDoneAt(n, done, now), doneBy: nextDoneBy(n, done, by), updatedAt: now };
   });
   return { file: found ? { ...file, notes } : file, found };
 }

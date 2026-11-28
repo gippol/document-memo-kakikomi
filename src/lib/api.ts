@@ -47,6 +47,8 @@ export const api = {
   readDocument: (root: string, rel: string) => invoke<DocContent>("read_document", { root, rel }),
   readDocumentBytes: (root: string, rel: string) => invoke<ArrayBuffer>("read_document_bytes", { root, rel }),
   readConfig: (root: string) => invoke<string | null>("read_config", { root }),
+  /** git の user.name（書いた人の名前の既定値）。git が無い・設定が無ければ null。root を渡すとそのフォルダの設定も見る */
+  gitUserName: (root: string | null) => invoke<string | null>("git_user_name", { root }),
   /**
    * PDF の描画結果のキャッシュ（アプリのキャッシュフォルダ。資料フォルダには置かない）。
    * key は PDF の版ごとの 64 桁の 16 進、name は text.json か p<ページ>.png。無ければ空の ArrayBuffer

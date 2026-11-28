@@ -216,13 +216,14 @@ describe("種類での絞り込み・完了にする", () => {
     const q = note({ kind: "question", comment: "質問" });
     const m = note({ comment: "メモ" });
     const f = { ...emptyNotesFile("a.md"), notes: [q, m] };
-    const done = setNoteDone(f, q.id, true, "2026-11-23T10:00:00.000Z");
+    const done = setNoteDone(f, q.id, true, "2026-11-23T10:00:00.000Z", "佐藤");
     expect(done.found).toBe(true);
-    expect(done.file.notes[0]).toMatchObject({ done: true, doneAt: "2026-11-23T10:00:00.000Z", updatedAt: "2026-11-23T10:00:00.000Z" });
+    expect(done.file.notes[0]).toMatchObject({ done: true, doneAt: "2026-11-23T10:00:00.000Z", doneBy: "佐藤", updatedAt: "2026-11-23T10:00:00.000Z" });
     expect(done.file.notes[1]).toBe(m);
     const undone = setNoteDone(done.file, q.id, false, "2026-11-23T11:00:00.000Z");
     expect(undone.file.notes[0].done).toBeUndefined();
     expect(undone.file.notes[0].doneAt).toBeUndefined();
+    expect(undone.file.notes[0].doneBy).toBeUndefined();
     expect(setNoteDone(f, m.id, true, "x")).toEqual({ file: f, found: false });
     expect(setNoteDone(f, "none", true, "x").found).toBe(false);
   });

@@ -61,12 +61,16 @@ function sourceOf(v: NoteView): string {
   return [heading && `§ ${heading}`, loc].filter(Boolean).join(" ");
 }
 
-/** 宿題・質問の担当者・期限・優先度・完了日の表記（例: `@田中 〜12/1 優先度:高`、`@田中 〜12/1 完了:12/3 2日遅れ`） */
+/**
+ * 宿題・質問の担当者・期限・優先度・完了日の表記
+ * （例: `@田中 〜12/1 優先度:高`、`@田中 〜12/1 完了:12/3(佐藤) 2日遅れ`。完了にした人は担当者と紛れないよう括弧に入れる）
+ */
 export function taskMeta(
-  n: { assignee?: string; due?: string; priority?: Priority; done?: boolean; doneAt?: string },
+  n: { assignee?: string; due?: string; priority?: Priority; done?: boolean; doneAt?: string; doneBy?: string },
   today: Date,
 ): string {
-  const doneOn = n.done ? doneAtLabel(n.doneAt, today) : null;
+  const doneDate = n.done ? doneAtLabel(n.doneAt, today) : null;
+  const doneOn = doneDate && n.doneBy ? `${doneDate}(${n.doneBy})` : doneDate;
   const late = n.done ? daysLate(n.due, n.doneAt) : 0;
   return [
     n.assignee && `@${n.assignee}`,

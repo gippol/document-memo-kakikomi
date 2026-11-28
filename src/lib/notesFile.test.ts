@@ -82,6 +82,39 @@ describe("完了の記録（doneAt）", () => {
   });
 });
 
+describe("書いた人・完了にした人", () => {
+  const AT = "2026-12-03T03:00:00.000Z";
+
+  it("読み書きで保たれ、author は createdAt の前、doneBy は doneAt の後ろに書く。完了でなければ doneBy は書かない", () => {
+    const out = serializeNotesFile(
+      parseNotesFile(
+        json([
+          { ...base, kind: "action", done: true, doneAt: AT, doneBy: "佐藤", author: "田中" },
+          { ...base, id: "n2", kind: "action", doneBy: "佐藤" },
+        ]),
+        "a.md",
+      ),
+    );
+    const notes = JSON.parse(out).notes;
+    expect(Object.keys(notes[0])).toEqual(["id", "kind", "comment", "done", "doneAt", "doneBy", "author", "createdAt", "updatedAt", "anchor"]);
+    expect(notes[0]).toMatchObject({ author: "田中", doneBy: "佐藤" });
+    expect(notes[1].doneBy).toBeUndefined();
+  });
+
+  it("文字列でなければ読めないノートとして残す", () => {
+    const f = parseNotesFile(json([{ ...base, author: 1 }, { ...base, id: "n2", kind: "action", done: true, doneBy: false }]), "a.md");
+    expect(f.invalid).toHaveLength(2);
+  });
+
+  it("withFields: 完了にした人を記録し、編集しても保ち、未完了にすると消す。書いた人は変えない", () => {
+    const n: Note = { ...parseNotesFile(json([{ ...base, kind: "action" }]), "a.md").notes[0], author: "田中" };
+    const done = withFields(n, { kind: "action", comment: "c", done: true }, AT, "佐藤");
+    expect(done).toMatchObject({ doneBy: "佐藤", author: "田中" });
+    expect(withFields(done, { kind: "action", comment: "直した", done: true }, AT, "鈴木").doneBy).toBe("佐藤");
+    expect(withFields(done, { kind: "action", comment: "c" }, AT, "鈴木").doneBy).toBeUndefined();
+  });
+});
+
 describe("全体メモ", () => {
   const place = (anchor: object) => ({ ...base, anchor: { quote: "", sourceSha256: "x", ...anchor } });
 
