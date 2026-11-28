@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lastAtOrAbove, notesPerEntry, tocEntries } from "./toc";
+import { lastAtOrAbove, notesPerEntry, tocByPage, tocEntries } from "./toc";
 
 const headings = [
   { text: "概要", level: 2, start: 0 },
@@ -30,6 +30,36 @@ describe("notesPerEntry", () => {
       [1, 2],
       [2, 2],
     ]);
+  });
+});
+
+describe("tocByPage", () => {
+  it("PDF の見出しを、始まる位置のページに振り分ける（見出しの無いページも出す）", () => {
+    const pages = [
+      { no: 1, start: 0, end: 100 },
+      { no: 2, start: 100, end: 200 },
+      { no: 3, start: 200, end: 300 },
+    ];
+    const toc = tocEntries(
+      [
+        { text: "表題", level: 1, start: 0 },
+        { text: "1. 進捗", level: 2, start: 40 },
+        { text: "2. 課題", level: 2, start: 200 },
+      ],
+      300,
+    );
+    expect(tocByPage(pages, toc).map((p) => [p.no, p.entries.map((e) => [e.text, e.depth])])).toEqual([
+      [
+        1,
+        [
+          ["表題", 0],
+          ["1. 進捗", 1],
+        ],
+      ],
+      [2, []],
+      [3, [["2. 課題", 1]]],
+    ]);
+    expect(tocByPage(pages, []).map((p) => p.entries.length)).toEqual([0, 0, 0]);
   });
 });
 
