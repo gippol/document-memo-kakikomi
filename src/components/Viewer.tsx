@@ -34,8 +34,11 @@ export interface ViewerHandle {
   /** 範囲の位置情報（Markdown: 行 / Word: 段落・見出し） */
   locate(start: number, end: number): AnchorLocation;
   scrollToRange(start: number, end: number): void;
-  /** いま見ている場所（PowerPoint: 表示中のスライド / PDF: 表示中のページ / Word・Markdown: 画面上部にかかる見出しの節）。全体メモの付け先に使う */
-  currentPlace(): PlaceOption | null;
+  /**
+   * いま見ている場所（広い順）。全体メモの付け先に使う。
+   * PowerPoint: 表示中のスライド / PDF: 画面上部にかかる見出しの節と表示中のページ / Word・Markdown: 画面上部にかかる見出しの節
+   */
+  currentPlaces(): PlaceOption[];
 }
 
 interface Props {
@@ -153,15 +156,16 @@ export function Viewer(props: Props) {
       // Markdown も議事録で議題ごとにまとめられるよう、直前の見出しを記録する
       return doc.kind === "markdown" ? { ...linesOfRange(r), heading: locateInHtml(body, r).heading } : locateInHtml(body, r);
     },
-    currentPlace() {
+    currentPlaces() {
       if (slides.length > 0) {
         const s = slides.find((x) => x.no === currentSlide);
-        return s ? { scope: "slide", slide: s.no, slideId: s.id, heading: s.title || undefined } : null;
+        return s ? [{ scope: "slide", slide: s.no, slideId: s.id, heading: s.title || undefined }] : [];
       }
-      if (pages.length > 0) return { scope: "page", page: currentSlide };
-      // 目次で示している節と同じもの（見出しより前を見ているときは資料全体）
+      // 目次で示している節と同じもの（見出しより前を見ているときは無し）
       const i = headingAtLine();
-      return i >= 0 && toc[i] ? { scope: "heading", heading: toc[i].text } : null;
+      const heading: PlaceOption[] = i >= 0 && toc[i] ? [{ scope: "heading", heading: toc[i].text }] : [];
+      // PDF は見出しの節とページの両方（節は複数ページにまたがることがあるので節が広い側）
+      return pages.length > 0 ? [...heading, { scope: "page", page: currentSlide }] : heading;
     },
     scrollToRange(start, end) {
       const sc = scrollRef.current;

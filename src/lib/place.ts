@@ -123,7 +123,10 @@ export function resolvePlace(a: PlaceAnchor, ctx: PlaceContext): ResolvedPlace {
   }
 }
 
-/** 全体メモの付け先の選択肢。資料全体と、いま見ている場所（スライド・ページ・シート・見出しの節。分からなければ無し） */
-export function placeOptions(here: PlaceOption | null): PlaceOption[] {
-  return here && here.scope !== "doc" ? [{ scope: "doc" }, here] : [{ scope: "doc" }];
+/**
+ * 全体メモの付け先の選択肢。資料全体と、いま見ている場所（広い順。最後が既定）。
+ * PDF は見出しの節とページの両方を出す（見出しより前を見ているときはページだけ）
+ */
+export function placeOptions(here: PlaceOption[]): PlaceOption[] {
+  return [{ scope: "doc" }, ...here.filter((p) => p.scope !== "doc")];
 }

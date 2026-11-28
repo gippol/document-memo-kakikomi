@@ -54,8 +54,14 @@ describe("全体メモの付け先", () => {
   });
 
   it("選択肢は資料全体と、いま見ている場所", () => {
-    expect(placeOptions(null)).toEqual([{ scope: "doc" }]);
-    expect(placeOptions({ scope: "sheet", sheet: "予算" })).toEqual([{ scope: "doc" }, { scope: "sheet", sheet: "予算" }]);
+    expect(placeOptions([])).toEqual([{ scope: "doc" }]);
+    expect(placeOptions([{ scope: "sheet", sheet: "予算" }])).toEqual([{ scope: "doc" }, { scope: "sheet", sheet: "予算" }]);
+    // PDF: 見出しの節とページ（既定は最後のページ）
+    expect(placeOptions([{ scope: "heading", heading: "2. 予算" }, { scope: "page", page: 3 }])).toEqual([
+      { scope: "doc" },
+      { scope: "heading", heading: "2. 予算" },
+      { scope: "page", page: 3 },
+    ]);
   });
 
   it("表示名", () => {
