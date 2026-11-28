@@ -17,6 +17,8 @@ export interface PickSupersede {
 }
 
 interface Props {
+  /** 資料フォルダ */
+  root: string;
   tab: BoardTab;
   onTab(t: BoardTab): void;
   /** 読み込み中は null */
@@ -36,7 +38,7 @@ interface Props {
  * 「宿題・質問」（未完了の宿題・未回答の質問のボード）と「決定事項」（決定事項の台帳）を切り替える。
  * 項目を押すとその資料の該当箇所へ移動する。
  */
-export function FolderBoard({ tab: shownTab, onTab, board, decisions, error, onJump, onSetDone, onClose, pick }: Props) {
+export function FolderBoard({ root, tab: shownTab, onTab, board, decisions, error, onJump, onSetDone, onClose, pick }: Props) {
   const tab = pick ? "decisions" : shownTab;
   // 日付が変わっても開いている間は同じ日で数える
   const [today] = useState(() => new Date());
@@ -97,7 +99,7 @@ export function FolderBoard({ tab: shownTab, onTab, board, decisions, error, onJ
         )}
 
         {tab === "tasks" ? (
-          <TaskBoard data={board} today={today} onJump={onJump} onSetDone={onSetDone} />
+          <TaskBoard root={root} data={board} today={today} onJump={onJump} onSetDone={onSetDone} />
         ) : (
           <DecisionLedger data={decisions} today={today} onJump={onJump} pick={pick} />
         )}

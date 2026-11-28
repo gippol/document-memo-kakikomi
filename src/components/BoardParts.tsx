@@ -3,13 +3,38 @@ import { useState, type ReactNode } from "react";
 import { copyText, errMsg } from "../lib/api";
 import type { FolderNote } from "../lib/board";
 
-/** ダイアログの下端: 案内・結果の表示と「Markdown をコピー」 */
-export function BoardFooter({ hint, disabled, markdown }: { hint: string; disabled: boolean; markdown(): string }) {
+/** 下端に足すボタン。run は結果の文を返す（キャンセルしたら null。失敗は throw） */
+export interface FooterAction {
+  label: string;
+  title: string;
+  run(): Promise<string | null>;
+}
+
+/** ダイアログの下端: 案内・結果の表示と「Markdown をコピー」（actions で書き出しのボタンを足せる） */
+export function BoardFooter({
+  hint,
+  disabled,
+  markdown,
+  actions = [],
+}: {
+  hint: string;
+  disabled: boolean;
+  markdown(): string;
+  actions?: FooterAction[];
+}) {
   const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null);
   const copy = async () => {
     try {
       await copyText(markdown());
       setStatus({ ok: true, msg: "Markdown をクリップボードにコピーしました" });
+    } catch (e) {
+      setStatus({ ok: false, msg: errMsg(e) });
+    }
+  };
+  const runAction = async (a: FooterAction) => {
+    try {
+      const msg = await a.run();
+      if (msg) setStatus({ ok: true, msg });
     } catch (e) {
       setStatus({ ok: false, msg: errMsg(e) });
     }
@@ -22,6 +47,11 @@ export function BoardFooter({ hint, disabled, markdown }: { hint: string; disabl
       <button onClick={copy} disabled={disabled} className="btn" title="表示中の一覧を Markdown でコピーします">
         Markdown をコピー
       </button>
+      {actions.map((a) => (
+        <button key={a.label} onClick={() => void runAction(a)} disabled={disabled} className="btn" title={a.title}>
+          {a.label}
+        </button>
+      ))}
     </div>
   );
 }

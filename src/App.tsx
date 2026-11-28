@@ -662,6 +662,7 @@ export default function App() {
 
       {pick && (
         <FolderBoard
+          root={root}
           tab="decisions"
           onTab={() => {}}
           board={folderNotes.board}
@@ -676,6 +677,7 @@ export default function App() {
 
       {boardOpen && root && (
         <FolderBoard
+          root={root}
           tab={boardTab}
           onTab={setBoardTab}
           board={folderNotes.board}

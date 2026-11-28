@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { api } from "../lib/api";
 import {
   BOARD_TITLE,
   boardMarkdown,
@@ -16,10 +17,13 @@ import {
   type FolderNote,
 } from "../lib/board";
 import { DONE_LABEL, dueLabel, formatDate, KIND_LABEL, PRIORITY_LABEL } from "../lib/noteMeta";
+import { boardCsv, exportFileName, issueMarkdown, issueTitle } from "../lib/taskExport";
 import { BoardFooter, BoardRow, firstLine, SourceCell } from "./BoardParts";
 import { KIND_STYLE, PRIORITY_STYLE } from "./NotesPanel";
 
 interface Props {
+  /** 資料フォルダ（書き出しの保存先の既定） */
+  root: string;
   /** 読み込み中は null */
   data: BoardData | null;
   today: Date;
@@ -49,7 +53,7 @@ const KINDS: [BoardKind, string, string][] = [
  * フォルダ全体の未完了の宿題・未回答の質問のボード。
  * 担当者別・期限順に並べ、期限切れ・今週・担当なしの件数を出す。行の右のボタンで完了（回答済み）にできる。
  */
-export function TaskBoard({ data, today, onJump, onSetDone }: Props) {
+export function TaskBoard({ root, data, today, onJump, onSetDone }: Props) {
   const [kind, setKind] = useState<BoardKind>("all");
   const [grouping, setGrouping] = useState<BoardGrouping>("assignee");
   const [filter, setFilter] = useState<BoardFilter>("all");
@@ -64,6 +68,16 @@ export function TaskBoard({ data, today, onJump, onSetDone }: Props) {
   const summary = useMemo(() => summarizeBoard(items, today), [items, today]);
   const groups = useMemo(() => groupBoard(filterBoard(items, filter, today), grouping, today), [items, filter, grouping, today]);
   const kindCount = (k: BoardKind) => filterKind(all, k).length;
+  const title = filter === "all" ? BOARD_TITLE[kind] : `${BOARD_TITLE[kind]}（${FILTER_LABEL[filter]}）`;
+
+  const save = async (format: "csv" | "issue") => {
+    const content = format === "csv" ? boardCsv(groups) : issueMarkdown(groups, today, title);
+    const path = await api.saveExport(root, format, exportFileName(title, format, today), content);
+    if (!path) return null;
+    return format === "csv"
+      ? `保存しました: ${path}`
+      : `保存しました: ${path} — gh issue create --title "${issueTitle(title, today)}" --body-file <このファイル>`;
+  };
 
   const count: Record<BoardFilter, number> = {
     all: summary.total,
@@ -190,7 +204,15 @@ export function TaskBoard({ data, today, onJump, onSetDone }: Props) {
       <BoardFooter
         hint="項目を押すと該当箇所へ移動します。Esc: 閉じる"
         disabled={!data}
-        markdown={() => boardMarkdown(groups, summary, today, filter === "all" ? BOARD_TITLE[kind] : `${BOARD_TITLE[kind]}（${FILTER_LABEL[filter]}）`)}
+        markdown={() => boardMarkdown(groups, summary, today, title)}
+        actions={[
+          { label: "CSV で保存", title: "表示中の一覧を CSV で保存します（Excel・スプレッドシートで開けます）", run: () => save("csv") },
+          {
+            label: "Issue 用 Markdown を保存",
+            title: "表示中の一覧を 1 つの Issue のチェックリストにして保存します（gh issue create --body-file に渡せます）",
+            run: () => save("issue"),
+          },
+        ]}
       />
     </>
   );
