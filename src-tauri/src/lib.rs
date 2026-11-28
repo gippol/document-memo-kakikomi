@@ -335,6 +335,30 @@ fn read_config(state: State<FolderState>, root: String) -> Result<Option<String>
         .map_err(|e| format!("設定ファイルを読めません: {e}"))
 }
 
+/// git の user.name（ノートを書いた人の名前の既定値）。git が無い・名前が設定されていなければ None。
+/// root を渡すと、そのフォルダの git の設定（リポジトリごとの名前）も見る。
+#[tauri::command]
+fn git_user_name(state: State<FolderState>, root: Option<String>) -> Result<Option<String>, String> {
+    let mut cmd = std::process::Command::new("git");
+    cmd.args(["config", "--get", "user.name"]);
+    if let Some(root) = root {
+        let (root_path, _) = checked_root(&state, &root)?;
+        cmd.current_dir(root_path);
+    }
+    // コンソールのウィンドウを一瞬出さない（CREATE_NO_WINDOW）
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    Ok(cmd
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty()))
+}
+
 /// 保存しようとしたノートファイルが、最後に読んだ／書いた内容から外部で変更されていたときのエラー。
 const NOTES_CONFLICT: &str = "NOTES_CONFLICT";
 
@@ -760,6 +784,7 @@ pub fn run() {
             read_document_bytes,
             read_notes,
             read_config,
+            git_user_name,
             write_notes,
             write_notes_backup,
             delete_orphan_notes,

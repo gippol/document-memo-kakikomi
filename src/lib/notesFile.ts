@@ -1,4 +1,5 @@
 import type { TextAnchor } from "./anchor";
+import { nextDoneBy } from "./author";
 import { fieldsPatch, isDueDate, isNoteKind, isPriority, nextDoneAt, type NoteFields, type NoteKind, type Priority } from "./noteMeta";
 import { PLACE_SCOPES, type PlaceAnchor } from "./place";
 import { parseRef, type CellAnchor } from "./sheet";
@@ -24,8 +25,12 @@ export interface Note {
   done?: boolean;
   /** 完了（回答済み）にした日時 ISO 8601（done のときだけ。この記録を始める前に完了にしたノートには無い） */
   doneAt?: string;
+  /** 完了（回答済み）にした人（done のときだけ。名前を決めていなければ無い） */
+  doneBy?: string;
   /** 決定のみ: この決定で置き換えた前の決定 */
   supersedes?: Supersedes;
+  /** 書いた人（名前を決めていなければ無い） */
+  author?: string;
   createdAt: string;
   updatedAt: string;
   anchor: Anchor;
@@ -144,14 +149,15 @@ function isSupersedes(s: unknown): boolean {
 
 /**
  * ノートの種類・コメント・担当者・期限・優先度・完了状態を変える。
- * 完了にした日時を記録し（未完了に戻すと消す）、置き換えのリンクは決定のときだけ残す
+ * 完了にした日時と人（by）を記録し（未完了に戻すと消す）、置き換えのリンクは決定のときだけ残す
  */
-export function withFields(n: Note, fields: NoteFields, now: string): Note {
+export function withFields(n: Note, fields: NoteFields, now: string, by?: string): Note {
   const patch = fieldsPatch(fields);
   return {
     ...n,
     ...patch,
     doneAt: nextDoneAt(n, patch.done, now),
+    doneBy: nextDoneBy(n, patch.done, by),
     supersedes: patch.kind === "decision" ? n.supersedes : undefined,
     updatedAt: now,
   };
@@ -165,7 +171,7 @@ export function isNote(v: unknown): v is Note {
   if (!optStr(v.assignee) || (v.due !== undefined && !isDueDate(v.due))) return false;
   if (v.priority !== undefined && !isPriority(v.priority)) return false;
   if (v.done !== undefined && typeof v.done !== "boolean") return false;
-  if (!optStr(v.doneAt)) return false;
+  if (!optStr(v.doneAt) || !optStr(v.doneBy) || !optStr(v.author)) return false;
   if (v.supersedes !== undefined && !isSupersedes(v.supersedes)) return false;
   const a = v.anchor;
   if (!isObj(a)) return false;
@@ -191,7 +197,9 @@ export function serializeNotesFile(file: NotesFile): string {
         priority: n.priority || undefined,
         done: n.done || undefined,
         doneAt: (n.done && n.doneAt) || undefined,
+        doneBy: (n.done && n.doneBy) || undefined,
         supersedes: n.supersedes ? { id: n.supersedes.id, doc: n.supersedes.doc, text: n.supersedes.text } : undefined,
+        author: n.author || undefined,
         createdAt: n.createdAt,
         updatedAt: n.updatedAt,
         anchor: orderAnchor(n.anchor),

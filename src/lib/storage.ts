@@ -11,6 +11,8 @@ export const LS_KEYS = {
   /** PowerPoint の表示（"cards" で文字のカード。既定は図） */
   pptxView: `${PREFIX}pptxView`,
   paneSize: (layout: string) => `${PREFIX}notesSize:${layout}`,
+  /** ノートに記録する名前（無ければ git の user.name。空文字は記録しない） */
+  author: `${PREFIX}author`,
 };
 
 export function lsGet(key: string): string | null {
@@ -18,6 +20,14 @@ export function lsGet(key: string): string | null {
     return localStorage.getItem(key);
   } catch {
     return null;
+  }
+}
+
+export function lsRemove(key: string) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* noop */
   }
 }
 

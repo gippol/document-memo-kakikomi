@@ -159,13 +159,16 @@ describe("buildMinutes", () => {
   it("完了した宿題には完了日を、期限を過ぎて完了したものには遅れた日数を添える", () => {
     const md = buildMinutes(
       [
-        view({ kind: "action", comment: "遅れた", assignee: "田中", due: "2026-12-01", done: true, doneAt: "2026-12-03T03:00:00.000Z" }, { paragraph: 1 }),
+        view(
+          { kind: "action", comment: "遅れた", assignee: "田中", due: "2026-12-01", done: true, doneAt: "2026-12-03T03:00:00.000Z", doneBy: "佐藤" },
+          { paragraph: 1 },
+        ),
         view({ kind: "action", comment: "間に合った", due: "2026-12-05", done: true, doneAt: "2026-12-03T03:00:00.000Z" }, { paragraph: 2 }),
         view({ kind: "action", comment: "記録なし", done: true }, { paragraph: 3 }),
       ],
       opts,
     );
-    expect(md).toContain("- [x] 遅れた — @田中 〜12/1 完了:12/3 2日遅れ（¶1）");
+    expect(md).toContain("- [x] 遅れた — @田中 〜12/1 完了:12/3(佐藤) 2日遅れ（¶1）");
     expect(md).toContain("- [x] 間に合った — 〜12/5 完了:12/3（¶2）");
     expect(md).toContain("- [x] 記録なし（¶3）");
   });

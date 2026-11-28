@@ -295,6 +295,7 @@ function TaskLine({ note, kind }: { note: Note; kind: NoteKind }) {
       <span className={note.done ? "text-dim" : overdue ? "text-warn" : "text-bright"}>
         [{note.done ? "x" : " "}] {note.done ? DONE_LABEL[kind] : "未完了"}
         {doneOn && ` ${doneOn}`}
+        {note.done && note.doneBy && ` (${note.doneBy})`}
       </span>
       {late > 0 && <span className="text-warn">{late}日遅れ</span>}
       {note.priority && <span className={PRIORITY_STYLE[note.priority]}>優先度:{PRIORITY_LABEL[note.priority]}</span>}
@@ -353,6 +354,12 @@ function NoteCard(props: {
         )}
         {view.stale && view.status === "ok" && <span title="ノート作成後に資料が更新されています">[OLD]</span>}
         <span className="ml-auto">{fmt(note.createdAt)}</span>
+        {note.author && (
+          // 名前は ID より大事なので縮めない（ID が先に省略される）。長い名前だけ 12 文字で切る
+          <span className="max-w-[12ch] truncate text-fg" title={`書いた人: ${note.author}`}>
+            {note.author}
+          </span>
+        )}
       </div>
       {/* 全体メモは付け先の行（◇）に見出し・スライドを出すので繰り返さない */}
       {view.heading && view.status !== "orphaned" && !view.place && (
