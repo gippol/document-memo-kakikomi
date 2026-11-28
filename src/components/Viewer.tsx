@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { trimRange, type AnchorLocation } from "../lib/anchor";
 import type { TextDoc } from "../lib/document";
 import { headingElements, headingSpans, linesOfRange, locateInHtml, pageSpans, slideSpans, TextIndex, type PageSpan, type SlideSpan } from "../lib/dom";
+import { NOTE_KINDS, type NoteKind } from "../lib/noteMeta";
 import type { HeadingSpan, PlaceOption } from "../lib/place";
 import { LS_KEYS, lsGet, lsSet } from "../lib/storage";
 import { lastAtOrAbove, notesPerEntry, tocEntries, type TocEntry } from "../lib/toc";
@@ -15,7 +16,13 @@ export interface HighlightSpec {
   start: number;
   end: number;
   stale: boolean;
+  /** 種類ごとにマーカーの色を変える */
+  kind: NoteKind;
 }
+
+/** ハイライトの名前（CSS の ::highlight(...)）。種類ごとの色の上に、古い印（波線）・選択中・書きかけを重ねる */
+const KIND_HIGHLIGHTS = NOTE_KINDS.map((k) => `note-${k}`);
+const HIGHLIGHT_NAMES = [...KIND_HIGHLIGHTS, "note-stale", "note-active", "note-pending"];
 
 export interface TextSelection {
   start: number;
@@ -287,17 +294,21 @@ export function Viewer(props: Props) {
   useEffect(() => {
     const index = indexRef.current;
     if (!index) return;
-    const normal: Range[] = [];
+    const byKind = new Map<NoteKind, Range[]>(NOTE_KINDS.map((k) => [k, []]));
     const stale: Range[] = [];
     const active: Range[] = [];
     for (const h of highlights) {
       const r = index.rangeAt(h.start, h.end);
       if (!r) continue;
-      if (h.id === activeId) active.push(r);
-      else (h.stale ? stale : normal).push(r);
+      if (h.id === activeId) {
+        active.push(r);
+        continue;
+      }
+      byKind.get(h.kind)?.push(r);
+      if (h.stale) stale.push(r);
     }
     const pend = pending ? index.rangeAt(pending.start, pending.end) : null;
-    setHighlight("note", normal, 1);
+    for (const k of NOTE_KINDS) setHighlight(`note-${k}`, byKind.get(k)!, 1);
     setHighlight("note-stale", stale, 2);
     setHighlight("note-active", active, 3);
     setHighlight("note-pending", pend ? [pend] : [], 4);
@@ -305,7 +316,7 @@ export function Viewer(props: Props) {
 
   useEffect(
     () => () => {
-      if ("highlights" in CSS) ["note", "note-stale", "note-active", "note-pending"].forEach((n) => CSS.highlights.delete(n));
+      if ("highlights" in CSS) HIGHLIGHT_NAMES.forEach((n) => CSS.highlights.delete(n));
     },
     [],
   );

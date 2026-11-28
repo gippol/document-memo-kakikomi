@@ -4,7 +4,7 @@
  * 資料を開かずに作るので、位置はノートに記録してある情報（スライド番号・見出し・行・段落・セル）で表す。
  */
 import { indentRest, oneLine, taskMeta } from "./minutes";
-import { dueLabel, formatDate, isOpen, isOverdue, priorityRank, PRIORITY_LABEL, type Priority } from "./noteMeta";
+import { dueLabel, formatDate, isOpen, isOverdue, nextDoneAt, priorityRank, PRIORITY_LABEL, type Priority } from "./noteMeta";
 import { parseNotesFile, type Note, type NotesFile } from "./notesFile";
 
 /** バックエンドの list_all_notes が返すノートファイル 1 つ分 */
@@ -290,7 +290,7 @@ export function setNoteDone(file: NotesFile, id: string, done: boolean, now: str
     if (n.id !== id || (n.kind !== "action" && n.kind !== "question")) return n;
     found = true;
     if (!!n.done === done) return n;
-    return { ...n, done: done || undefined, updatedAt: now };
+    return { ...n, done: done || undefined, doneAt: nextDoneAt(n, done, now), updatedAt: now };
   });
   return { file: found ? { ...file, notes } : file, found };
 }

@@ -152,13 +152,17 @@ export function countByFilter(views: NoteView[]): Record<NoteFilter, number> {
 
 export function textHighlights(views: NoteView[]): HighlightSpec[] {
   return views.flatMap((v) =>
-    v.target?.kind === "text" ? [{ id: v.note.id, start: v.target.start, end: v.target.end, stale: v.status === "fuzzy" }] : [],
+    v.target?.kind === "text"
+      ? [{ id: v.note.id, start: v.target.start, end: v.target.end, stale: v.status === "fuzzy", kind: kindOf(v.note) }]
+      : [],
   );
 }
 
 export function cellHighlights(views: NoteView[]): CellHighlight[] {
   return views.flatMap((v) =>
-    v.target?.kind === "cell" ? [{ id: v.note.id, sheet: v.target.sheet, range: v.target.range, stale: v.status === "fuzzy" }] : [],
+    v.target?.kind === "cell"
+      ? [{ id: v.note.id, sheet: v.target.sheet, range: v.target.range, stale: v.status === "fuzzy", kind: kindOf(v.note) }]
+      : [],
   );
 }
 

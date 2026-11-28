@@ -3,7 +3,9 @@ import type { AnchorLocation, AnchorStatus } from "../lib/anchor";
 import { insertTemplate, type NoteTemplate } from "../lib/config";
 import {
   applyShorthand,
+  daysLate,
   DONE_LABEL,
+  doneAtLabel,
   dueLabel,
   fieldsOf,
   formatDate,
@@ -286,11 +288,15 @@ function TaskLine({ note, kind }: { note: Note; kind: NoteKind }) {
   const today = new Date();
   const overdue = isOverdue({ ...note, kind }, today);
   const dueToday = !note.done && note.due === formatDate(today);
+  const doneOn = note.done ? doneAtLabel(note.doneAt, today) : null;
+  const late = note.done ? daysLate(note.due, note.doneAt) : 0;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-[1ch]">
       <span className={note.done ? "text-dim" : overdue ? "text-warn" : "text-bright"}>
         [{note.done ? "x" : " "}] {note.done ? DONE_LABEL[kind] : "未完了"}
+        {doneOn && ` ${doneOn}`}
       </span>
+      {late > 0 && <span className="text-warn">{late}日遅れ</span>}
       {note.priority && <span className={PRIORITY_STYLE[note.priority]}>優先度:{PRIORITY_LABEL[note.priority]}</span>}
       {note.assignee && <span className="text-fg">@{note.assignee}</span>}
       {note.due && (

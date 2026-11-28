@@ -76,12 +76,24 @@ body {
   cursor: default;
 }
 
-/* ノートのハイライト（CSS Custom Highlight API。資料の DOM は書き換えない） */
-::highlight(note) {
+/*
+ * ノートのハイライト（CSS Custom Highlight API。資料の DOM は書き換えない）。
+ * 種類ごとにマーカーの色を変える: メモ 黄・決定 緑・宿題 桃・質問 紫
+ * （選択中は橙、書きかけは青なので、それと紛れない色にする）。古いノートは色の上に波線を重ねる
+ */
+::highlight(note-memo) {
   background-color: #f7dc9c;
 }
+::highlight(note-decision) {
+  background-color: #c4e6b4;
+}
+::highlight(note-action) {
+  background-color: #f6c3d4;
+}
+::highlight(note-question) {
+  background-color: #d8cdf5;
+}
 ::highlight(note-stale) {
-  background-color: #f7dc9c;
   text-decoration: underline wavy var(--color-warn);
 }
 ::highlight(note-active) {
@@ -637,9 +649,23 @@ body {
   color: transparent;
 }
 /* ページ画像の文字が見えるよう、ハイライトは半透明にして文字の層の文字は出さない */
-.doc-pdf ::highlight(note),
-.doc-pdf ::highlight(note-stale) {
+.doc-pdf ::highlight(note-memo) {
   background-color: rgb(240 190 60 / 0.4);
+  color: transparent;
+}
+.doc-pdf ::highlight(note-decision) {
+  background-color: rgb(90 180 70 / 0.35);
+  color: transparent;
+}
+.doc-pdf ::highlight(note-action) {
+  background-color: rgb(230 90 140 / 0.3);
+  color: transparent;
+}
+.doc-pdf ::highlight(note-question) {
+  background-color: rgb(140 110 220 / 0.3);
+  color: transparent;
+}
+.doc-pdf ::highlight(note-stale) {
   color: transparent;
 }
 .doc-pdf ::highlight(note-active) {
@@ -715,6 +741,18 @@ body {
   background: rgb(247 220 156 / 0.45);
   outline: 1px solid #d9a441;
   outline-offset: -1px;
+}
+.cell-mark.kind-decision {
+  background: rgb(196 230 180 / 0.5);
+  outline-color: #6fae55;
+}
+.cell-mark.kind-action {
+  background: rgb(246 195 212 / 0.5);
+  outline-color: #d2759a;
+}
+.cell-mark.kind-question {
+  background: rgb(216 205 245 / 0.5);
+  outline-color: #8f7bd0;
 }
 .cell-mark.stale {
   outline: 1px dashed var(--color-warn);

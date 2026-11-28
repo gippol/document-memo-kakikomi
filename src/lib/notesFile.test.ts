@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseNotesFile, serializeNotesFile } from "./notesFile";
+import { parseNotesFile, serializeNotesFile, withFields, type Note } from "./notesFile";
 
 const anchor = {
   type: "text",
@@ -47,6 +47,38 @@ describe("ノートの種類・担当者・期限", () => {
     const f = parseNotesFile(json([{ ...base, kind: "unknown" }, { ...base, id: "n2", due: "12/1" }, { ...base, id: "n3", done: "yes" }, { ...base, id: "n4", priority: "urgent" }]), "a.md");
     expect(f.notes).toHaveLength(0);
     expect(f.invalid).toHaveLength(4);
+  });
+});
+
+describe("完了の記録（doneAt）", () => {
+  const AT = "2026-12-03T03:00:00.000Z";
+
+  it("読み書きで保たれ、done の後ろに書く。完了でなければ書かない", () => {
+    const out = serializeNotesFile(parseNotesFile(json([{ ...base, kind: "action", done: true, doneAt: AT }, { ...base, id: "n2", kind: "action", doneAt: AT }]), "a.md"));
+    const notes = JSON.parse(out).notes;
+    expect(notes[0]).toMatchObject({ done: true, doneAt: AT });
+    expect(Object.keys(notes[0])).toEqual(["id", "kind", "comment", "done", "doneAt", "createdAt", "updatedAt", "anchor"]);
+    expect(notes[1].doneAt).toBeUndefined();
+  });
+
+  it("文字列でなければ読めないノートとして残す", () => {
+    expect(parseNotesFile(json([{ ...base, kind: "action", done: true, doneAt: 1 }]), "a.md").invalid).toHaveLength(1);
+  });
+
+  it("withFields: 完了にすると日時を記録し、編集しても保ち、未完了・メモにすると消す", () => {
+    const n = parseNotesFile(json([{ ...base, kind: "action" }]), "a.md").notes[0];
+    const done = withFields(n, { kind: "action", comment: "c", done: true }, AT);
+    expect(done).toMatchObject({ done: true, doneAt: AT, updatedAt: AT });
+    const edited = withFields(done, { kind: "action", comment: "直した", done: true }, "2026-12-05T00:00:00.000Z");
+    expect(edited.doneAt).toBe(AT);
+    expect(withFields(done, { kind: "action", comment: "c" }, AT).doneAt).toBeUndefined();
+    expect(withFields(done, { kind: "memo", comment: "c", done: true }, AT)).toMatchObject({ done: undefined, doneAt: undefined });
+  });
+
+  it("withFields: 置き換えのリンクは決定のときだけ残す", () => {
+    const d: Note = { ...parseNotesFile(json([{ ...base, kind: "decision" }]), "a.md").notes[0], supersedes: { id: "x", doc: "a.md", text: "前" } };
+    expect(withFields(d, { kind: "decision", comment: "c2" }, AT).supersedes).toEqual({ id: "x", doc: "a.md", text: "前" });
+    expect(withFields(d, { kind: "memo", comment: "c2" }, AT).supersedes).toBeUndefined();
   });
 });
 

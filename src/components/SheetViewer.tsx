@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
+import type { NoteKind } from "../lib/noteMeta";
 import { colName, contains, expandMerges, formatRef, rangeQuote, rangeText, type CellRange, type Sheet, type SheetBook } from "../lib/sheet";
 
 export interface CellHighlight {
@@ -6,6 +7,8 @@ export interface CellHighlight {
   sheet: string;
   range: CellRange;
   stale: boolean;
+  /** 種類ごとにマーカーの色を変える */
+  kind: NoteKind;
 }
 
 export interface CellSelection {
@@ -322,7 +325,7 @@ export function SheetViewer(props: Props) {
         >
           <Grid sheet={sheet} />
           {boxes.map(({ h, box }) => (
-            <div key={h.id} className={`cell-mark ${h.id === activeId ? "active" : h.stale ? "stale" : ""}`} style={style(box)} />
+            <div key={h.id} className={`cell-mark kind-${h.kind} ${h.id === activeId ? "active" : h.stale ? "stale" : ""}`} style={style(box)} />
           ))}
           {pendBox && <div className="cell-mark pending" style={style(pendBox)} />}
           {selBox && <div className="cell-sel" style={style(selBox)} />}
