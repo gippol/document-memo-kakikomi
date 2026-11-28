@@ -460,18 +460,47 @@ fn remove_orphan_notes(root: &Path, canon: &Path, rel: &str, expected: &str) -> 
     fs::remove_file(&path).map_err(|e| format!("ノートファイルを削除できません: {e}"))
 }
 
-/// 議事録の保存先を確かめる。拡張子が無ければ `.md` を付ける。
+/// 書き出すファイルの形式（保存ダイアログの題名・ファイルの種類、使える拡張子。先頭が既定）
+struct ExportFormat {
+    title: &'static str,
+    filter: &'static str,
+    exts: &'static [&'static str],
+    ext_error: &'static str,
+}
+
+const MINUTES_FORMAT: ExportFormat = ExportFormat {
+    title: "議事録を保存",
+    filter: "Markdown",
+    exts: &["md", "markdown", "txt"],
+    ext_error: "議事録は .md（または .txt）で保存してください",
+};
+
+/// 宿題・質問ボードの書き出し（`save_export` の format）
+fn board_export_format(format: &str) -> Result<ExportFormat, String> {
+    match format {
+        "csv" => Ok(ExportFormat { title: "CSV を保存", filter: "CSV", exts: &["csv"], ext_error: "CSV は .csv で保存してください" }),
+        "issue" => Ok(ExportFormat {
+            title: "Issue 用 Markdown を保存",
+            filter: "Markdown",
+            exts: &["md", "markdown", "txt"],
+            ext_error: "Issue 用 Markdown は .md（または .txt）で保存してください",
+        }),
+        _ => Err(format!("書き出しの形式が分かりません: {format}")),
+    }
+}
+
+/// 書き出しの保存先を確かめる。拡張子が無ければ既定の拡張子を付ける。
 /// ノートを付けている資料（`<path>.notes.json` がある）や書き出し元の資料は上書きしない。
-fn minutes_target(path: PathBuf, source_doc: &Path) -> Result<PathBuf, String> {
-    let path = if path.extension().is_none() { path.with_extension("md") } else { path };
+fn export_target(path: PathBuf, format: &ExportFormat, source_doc: Option<&Path>) -> Result<PathBuf, String> {
+    let path = if path.extension().is_none() { path.with_extension(format.exts[0]) } else { path };
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-    if ext != "md" && ext != "markdown" && ext != "txt" {
-        return Err("議事録は .md（または .txt）で保存してください".to_string());
+    if !format.exts.contains(&ext.as_str()) {
+        return Err(format.ext_error.to_string());
     }
     let mut notes = path.clone().into_os_string();
     notes.push(NOTES_SUFFIX);
-    let same_as_source = match (fs::canonicalize(&path), fs::canonicalize(source_doc)) {
-        (Ok(a), Ok(b)) => a == b,
+    let same_as_source = match (fs::canonicalize(&path), source_doc.map(fs::canonicalize)) {
+        (Ok(a), Some(Ok(b))) => a == b,
         _ => false,
     };
     if same_as_source || Path::new(&notes).exists() {
@@ -483,9 +512,38 @@ fn minutes_target(path: PathBuf, source_doc: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// 議事録の Markdown を、保存ダイアログで選んだ場所に書き出す（既定は資料と同じフォルダ）。
-/// 保存先はフロントエンドから受け取らず、ここで出したダイアログの結果だけを使う。
+/// 保存ダイアログで選んだ場所に content を書き出す。保存先はフロントエンドから受け取らず、ここで出したダイアログの結果だけを使う。
 /// 保存したファイルのパスを返す（キャンセルしたら None）。
+fn save_with_dialog(
+    app: &AppHandle,
+    window: &tauri::Window,
+    dir: &Path,
+    file_name: &str,
+    format: &ExportFormat,
+    source_doc: Option<&Path>,
+    content: &str,
+) -> Result<Option<String>, String> {
+    // 非同期コマンドはメインスレッドの外で動くので、ダイアログを待ってよい。
+    // 親ウィンドウを指定して、アプリの後ろに隠れないようにする（モーダルになる）
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .set_parent(window)
+        .set_title(format.title)
+        .set_directory(dir)
+        .set_file_name(file_name)
+        .add_filter(format.filter, &format.exts[..1])
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| format!("保存先を扱えません: {e}"))?;
+    let path = export_target(path, format, source_doc)?;
+    fs::write(&path, content.as_bytes()).map_err(|e| format!("保存に失敗しました: {e}"))?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// 議事録の Markdown を、保存ダイアログで選んだ場所に書き出す（既定は資料と同じフォルダ）。
 #[tauri::command]
 async fn save_minutes(
     app: AppHandle,
@@ -499,24 +557,23 @@ async fn save_minutes(
     let (root_path, canon) = checked_root(&state, &root)?;
     let source = resolve_existing(&root_path, &canon, &rel)?.ok_or_else(|| format!("資料が見つかりません: {rel}"))?;
     let dir = source.parent().map(Path::to_path_buf).unwrap_or(root_path);
-    // 非同期コマンドはメインスレッドの外で動くので、ダイアログを待ってよい。
-    // 親ウィンドウを指定して、アプリの後ろに隠れないようにする（モーダルになる）
-    let Some(picked) = app
-        .dialog()
-        .file()
-        .set_parent(&window)
-        .set_title("議事録を保存")
-        .set_directory(&dir)
-        .set_file_name(&file_name)
-        .add_filter("Markdown", &["md"])
-        .blocking_save_file()
-    else {
-        return Ok(None);
-    };
-    let path = picked.into_path().map_err(|e| format!("保存先を扱えません: {e}"))?;
-    let path = minutes_target(path, &source)?;
-    fs::write(&path, content.as_bytes()).map_err(|e| format!("保存に失敗しました: {e}"))?;
-    Ok(Some(path.to_string_lossy().into_owned()))
+    save_with_dialog(&app, &window, &dir, &file_name, &MINUTES_FORMAT, Some(&source), &content)
+}
+
+/// フォルダ全体の宿題・質問の書き出し（format は "csv" か "issue"）を、保存ダイアログで選んだ場所に書き出す（既定は資料フォルダ）。
+#[tauri::command]
+async fn save_export(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, FolderState>,
+    root: String,
+    format: String,
+    file_name: String,
+    content: String,
+) -> Result<Option<String>, String> {
+    let (root_path, _) = checked_root(&state, &root)?;
+    let format = board_export_format(&format)?;
+    save_with_dialog(&app, &window, &root_path, &file_name, &format, None, &content)
 }
 
 /// 利用者がフォルダ選択ダイアログで選んだフォルダの一覧（新しい順）を置くファイル。
@@ -789,6 +846,7 @@ pub fn run() {
             write_notes_backup,
             delete_orphan_notes,
             save_minutes,
+            save_export,
             pick_folder,
             open_folder,
             pdf_cache_get,
@@ -846,19 +904,36 @@ mod tests {
     }
 
     #[test]
-    fn minutes_target_refuses_annotated_documents() {
+    fn export_target_refuses_annotated_documents() {
         let root = temp_dir("minutes");
         let doc = root.join("資料.docx");
         fs::write(&doc, "x").unwrap();
+        let m = &MINUTES_FORMAT;
         // 拡張子が無ければ .md を付ける
-        assert_eq!(minutes_target(root.join("議事録"), &doc).unwrap(), root.join("議事録.md"));
-        assert!(minutes_target(root.join("議事録.md"), &doc).is_ok());
+        assert_eq!(export_target(root.join("議事録"), m, Some(&doc)).unwrap(), root.join("議事録.md"));
+        assert!(export_target(root.join("議事録.md"), m, Some(&doc)).is_ok());
         // ノートを付けている資料・書き出し元の資料・資料の形式には書かない
         fs::write(root.join("spec.md"), "y").unwrap();
         fs::write(root.join("spec.md.notes.json"), "{}").unwrap();
-        assert!(minutes_target(root.join("spec.md"), &doc).is_err());
-        assert!(minutes_target(doc.clone(), &doc).is_err());
-        assert!(minutes_target(root.join("a.xlsx"), &doc).is_err());
+        assert!(export_target(root.join("spec.md"), m, Some(&doc)).is_err());
+        assert!(export_target(doc.clone(), m, Some(&doc)).is_err());
+        assert!(export_target(root.join("a.xlsx"), m, Some(&doc)).is_err());
+    }
+
+    #[test]
+    fn board_export_formats() {
+        let root = temp_dir("export");
+        let csv = board_export_format("csv").unwrap();
+        let issue = board_export_format("issue").unwrap();
+        assert!(board_export_format("exe").is_err());
+        assert_eq!(export_target(root.join("宿題"), &csv, None).unwrap(), root.join("宿題.csv"));
+        assert!(export_target(root.join("宿題.md"), &csv, None).is_err());
+        assert_eq!(export_target(root.join("宿題"), &issue, None).unwrap(), root.join("宿題.md"));
+        assert!(export_target(root.join("宿題.csv"), &issue, None).is_err());
+        // ノートを付けている CSV の資料には上書きしない
+        fs::write(root.join("data.csv"), "a,b").unwrap();
+        fs::write(root.join("data.csv.notes.json"), "{}").unwrap();
+        assert!(export_target(root.join("data.csv"), &csv, None).is_err());
     }
 
     #[test]

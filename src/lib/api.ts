@@ -78,6 +78,12 @@ export const api = {
    */
   saveMinutes: (root: string, rel: string, fileName: string, content: string) =>
     invoke<string | null>("save_minutes", { root, rel, fileName, content }),
+  /**
+   * フォルダ全体の宿題・質問の書き出し（csv: CSV / issue: Issue 用 Markdown）を保存する。
+   * 保存先は Rust 側で出す保存ダイアログで選ぶ（既定は資料フォルダ）。保存したファイルのパスを返す（キャンセルしたら null）
+   */
+  saveExport: (root: string, format: "csv" | "issue", fileName: string, content: string) =>
+    invoke<string | null>("save_export", { root, format, fileName, content }),
   /** 資料フォルダを登録して監視を始める。ほかのコマンドはこのフォルダに対してのみ動く */
   openFolder: (root: string) => invoke<void>("open_folder", { root }),
   onFsChanged: (cb: (paths: string[]) => void): Promise<UnlistenFn> =>
